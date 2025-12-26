@@ -653,6 +653,15 @@ const startServer = async () => {
         console.log('⚠️ Migration 45 warning:', error.message);
       }
 
+      // Migration 46: 10 Lakh Record Performance Optimization Indexes
+      try {
+        const add10LakhOptimizationIndexes = require('./migrations/46_add_10_lakh_optimization_indexes');
+        await add10LakhOptimizationIndexes.up();
+        console.log('✅ Migration 46: 10 Lakh Record Performance Optimization indexes added');
+      } catch (error) {
+        console.log('⚠️ Migration 46 warning:', error.message);
+      }
+
       console.log('✅ Migrations completed.');
     } catch (error) {
       console.log('⚠️ Migrations warning:', error.message);
