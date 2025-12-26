@@ -34,12 +34,16 @@ const yieldRoutes = require('./routes/yield');
 
 const compression = require('compression');
 const performanceMonitor = require('./middleware/performanceMonitor');
+const { queryTimingMiddleware } = require('./middleware/querySafety');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Performance monitoring (tracks response times)
 app.use(performanceMonitor);
+
+// Query timing warnings for slow requests (10 lakh record safety)
+app.use(queryTimingMiddleware);
 
 // Performance: Enable gzip compression
 app.use(compression({
