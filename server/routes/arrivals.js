@@ -49,11 +49,11 @@ router.get('/next-sl-no', auth, async (req, res) => {
 // Get stock locations for a variety - OPTIMIZED
 router.get('/stock/variety-locations/:variety', auth, async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const { variety } = req.params;
     const { dateFrom, dateTo } = req.query;
-    
+
     if (!variety) {
       return res.status(400).json({ error: 'Variety is required' });
     }
@@ -63,12 +63,12 @@ router.get('/stock/variety-locations/:variety', auth, async (req, res) => {
       dateFrom,
       dateTo
     });
-    
+
     const responseTime = Date.now() - startTime;
 
     // Cache for 1 minute (stock changes frequently)
     res.set('Cache-Control', 'public, max-age=60');
-    res.json({ 
+    res.json({
       locations: stockLocations,
       performance: {
         responseTime: `${responseTime}ms`
@@ -109,8 +109,8 @@ router.post('/', auth, async (req, res) => {
 
     // Validate required fields
     if (!date || !movementType || !wbNo || !grossWeight || !tareWeight || !lorryNumber) {
-      return res.status(400).json({ 
-        error: 'Required fields: date, movementType, wbNo, grossWeight, tareWeight, lorryNumber' 
+      return res.status(400).json({
+        error: 'Required fields: date, movementType, wbNo, grossWeight, tareWeight, lorryNumber'
       });
     }
 
@@ -130,8 +130,8 @@ router.post('/', auth, async (req, res) => {
       // For production purchase, only require outturn (validated later)
       if (purchaseType !== 'for-production') {
         if (!normalizedVariety || !toKunchinintuId || !toWarehouseId) {
-          return res.status(400).json({ 
-            error: 'Purchase requires variety, toKunchinintuId and toWarehouseId' 
+          return res.status(400).json({
+            error: 'Purchase requires variety, toKunchinintuId and toWarehouseId'
           });
         }
       }
@@ -142,21 +142,21 @@ router.post('/', auth, async (req, res) => {
         const outturn = await Outturn.findByPk(fromOutturnId, {
           attributes: ['id', 'code', 'allottedVariety']
         });
-        
+
         if (!outturn) {
-          return res.status(400).json({ 
-            error: '❌ Invalid outturn selected for purchase from production' 
+          return res.status(400).json({
+            error: '❌ Invalid outturn selected for purchase from production'
           });
         }
 
         // Validate variety matches outturn
         const outturnVarietyNormalized = outturn.allottedVariety.trim().toUpperCase();
         if (outturnVarietyNormalized !== normalizedVariety) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: `❌ VARIETY MISMATCH\n\n` +
-                   `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety.\n` +
-                   `You are trying to purchase "${variety}" variety.\n\n` +
-                   `Solution: Change variety to "${outturn.allottedVariety}".`
+              `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety.\n` +
+              `You are trying to purchase "${variety}" variety.\n\n` +
+              `Solution: Change variety to "${outturn.allottedVariety}".`
           });
         }
 
@@ -171,100 +171,100 @@ router.post('/', auth, async (req, res) => {
 
         // STEP 1: Get Kunchinittu with its allotted variety and warehouse
         const kunchinittu = await Kunchinittu.findByPk(toKunchinintuId, {
-        attributes: ['id', 'name', 'code', 'varietyId', 'warehouseId'],
-        include: [
-          { 
-            model: Variety, 
-            as: 'variety', 
-            attributes: ['id', 'name'],
-            required: false 
-          },
-          {
-            model: Warehouse,
-            as: 'warehouse',
-            attributes: ['id', 'name', 'code'],
-            required: false
+          attributes: ['id', 'name', 'code', 'varietyId', 'warehouseId'],
+          include: [
+            {
+              model: Variety,
+              as: 'variety',
+              attributes: ['id', 'name'],
+              required: false
+            },
+            {
+              model: Warehouse,
+              as: 'warehouse',
+              attributes: ['id', 'name', 'code'],
+              required: false
+            }
+          ]
+        });
+
+        if (!kunchinittu) {
+          return res.status(400).json({
+            error: '❌ Invalid Kunchinittu selected'
+          });
+        }
+
+        // STEP 2: Validate Warehouse belongs to Kunchinittu
+        const selectedWarehouse = await Warehouse.findByPk(toWarehouseId, {
+          attributes: ['id', 'name', 'code']
+        });
+
+        if (!selectedWarehouse) {
+          return res.status(400).json({
+            error: '❌ Invalid Warehouse selected'
+          });
+        }
+
+        if (kunchinittu.warehouseId !== toWarehouseId) {
+          return res.status(400).json({
+            error: `❌ WAREHOUSE MISMATCH\n\n` +
+              `Problem: Kunchinittu "${kunchinittu.code}" belongs to warehouse "${kunchinittu.warehouse?.code}", not "${selectedWarehouse.code}".\n\n` +
+              `Solution: Please select warehouse "${kunchinittu.warehouse?.code}" for Kunchinittu "${kunchinittu.code}".`
+          });
+        }
+
+        // STEP 3: Validate Variety matches Kunchinittu's allotted variety
+        if (kunchinittu.varietyId && kunchinittu.variety) {
+          const allottedVarietyNormalized = kunchinittu.variety.name.trim().toUpperCase();
+
+          if (allottedVarietyNormalized !== normalizedVariety) {
+            return res.status(400).json({
+              error: `❌ VARIETY MISMATCH\n\n` +
+                `Problem: Kunchinittu "${kunchinittu.code}" is allotted to "${kunchinittu.variety.name}" variety ONLY.\n` +
+                `You are trying to store "${variety}" variety.\n\n` +
+                `Solution: Either:\n` +
+                `1. Change variety to "${kunchinittu.variety.name}", OR\n` +
+                `2. Select a different Kunchinittu that is allotted to "${variety}" variety.`
+            });
           }
-        ]
-      });
 
-      if (!kunchinittu) {
-        return res.status(400).json({ 
-          error: '❌ Invalid Kunchinittu selected' 
-        });
-      }
-
-      // STEP 2: Validate Warehouse belongs to Kunchinittu
-      const selectedWarehouse = await Warehouse.findByPk(toWarehouseId, {
-        attributes: ['id', 'name', 'code']
-      });
-
-      if (!selectedWarehouse) {
-        return res.status(400).json({ 
-          error: '❌ Invalid Warehouse selected' 
-        });
-      }
-
-      if (kunchinittu.warehouseId !== toWarehouseId) {
-        return res.status(400).json({ 
-          error: `❌ WAREHOUSE MISMATCH\n\n` +
-                 `Problem: Kunchinittu "${kunchinittu.code}" belongs to warehouse "${kunchinittu.warehouse?.code}", not "${selectedWarehouse.code}".\n\n` +
-                 `Solution: Please select warehouse "${kunchinittu.warehouse?.code}" for Kunchinittu "${kunchinittu.code}".`
-        });
-      }
-
-      // STEP 3: Validate Variety matches Kunchinittu's allotted variety
-      if (kunchinittu.varietyId && kunchinittu.variety) {
-        const allottedVarietyNormalized = kunchinittu.variety.name.trim().toUpperCase();
-        
-        if (allottedVarietyNormalized !== normalizedVariety) {
-          return res.status(400).json({ 
-            error: `❌ VARIETY MISMATCH\n\n` +
-                   `Problem: Kunchinittu "${kunchinittu.code}" is allotted to "${kunchinittu.variety.name}" variety ONLY.\n` +
-                   `You are trying to store "${variety}" variety.\n\n` +
-                   `Solution: Either:\n` +
-                   `1. Change variety to "${kunchinittu.variety.name}", OR\n` +
-                   `2. Select a different Kunchinittu that is allotted to "${variety}" variety.`
-          });
+          console.log(`✅ Variety validation passed: ${normalizedVariety} matches Kunchinittu ${kunchinittu.code} allotted variety`);
+        } else {
+          // Kunchinittu has no allotted variety - check existing stock
+          console.log(`⚠️ Kunchinittu ${kunchinittu.code} has no allotted variety - checking existing stock`);
         }
-        
-        console.log(`✅ Variety validation passed: ${normalizedVariety} matches Kunchinittu ${kunchinittu.code} allotted variety`);
-      } else {
-        // Kunchinittu has no allotted variety - check existing stock
-        console.log(`⚠️ Kunchinittu ${kunchinittu.code} has no allotted variety - checking existing stock`);
-      }
 
-      // STEP 4: Check if Kunchinittu already has a DIFFERENT variety in stock
-      const existingStock = await Arrival.findOne({
-        where: {
-          toKunchinintuId,
-          status: 'approved',
-          adminApprovedBy: { [Op.not]: null }, // Only admin-approved stock
-          variety: { [Op.ne]: null }
-        },
-        attributes: ['variety'],
-        order: [['createdAt', 'DESC']]
-      });
+        // STEP 4: Check if Kunchinittu already has a DIFFERENT variety in stock
+        const existingStock = await Arrival.findOne({
+          where: {
+            toKunchinintuId,
+            status: 'approved',
+            adminApprovedBy: { [Op.not]: null }, // Only admin-approved stock
+            variety: { [Op.ne]: null }
+          },
+          attributes: ['variety'],
+          order: [['createdAt', 'DESC']]
+        });
 
-      if (existingStock) {
-        const existingVarietyNormalized = existingStock.variety.trim().toUpperCase();
-        
-        if (existingVarietyNormalized !== normalizedVariety) {
-          return res.status(400).json({ 
-            error: `❌ VARIETY CONFLICT\n\n` +
-                   `Problem: Kunchinittu "${kunchinittu.code}" already contains "${existingStock.variety}" variety in stock.\n` +
-                   `You are trying to store "${variety}" variety.\n` +
-                   `Cannot mix different varieties in the same Kunchinittu.\n\n` +
-                   `Solution: Either:\n` +
-                   `1. Change variety to "${existingStock.variety}" (existing variety), OR\n` +
-                   `2. Select a different Kunchinittu for "${variety}" variety.`
-          });
+        if (existingStock) {
+          const existingVarietyNormalized = existingStock.variety.trim().toUpperCase();
+
+          if (existingVarietyNormalized !== normalizedVariety) {
+            return res.status(400).json({
+              error: `❌ VARIETY CONFLICT\n\n` +
+                `Problem: Kunchinittu "${kunchinittu.code}" already contains "${existingStock.variety}" variety in stock.\n` +
+                `You are trying to store "${variety}" variety.\n` +
+                `Cannot mix different varieties in the same Kunchinittu.\n\n` +
+                `Solution: Either:\n` +
+                `1. Change variety to "${existingStock.variety}" (existing variety), OR\n` +
+                `2. Select a different Kunchinittu for "${variety}" variety.`
+            });
+          }
+
+          console.log(`✅ Stock validation passed: ${normalizedVariety} matches existing stock in ${kunchinittu.code}`);
+        } else {
+          console.log(`✅ Empty location: ${normalizedVariety} can be stored in ${kunchinittu.code} (first stock)`);
         }
-        
-        console.log(`✅ Stock validation passed: ${normalizedVariety} matches existing stock in ${kunchinittu.code}`);
-      } else {
-        console.log(`✅ Empty location: ${normalizedVariety} can be stored in ${kunchinittu.code} (first stock)`);
-      }
 
         // STEP 5: Final validation summary
         console.log(`✅ CHAIN VALIDATION PASSED: ${normalizedVariety} → ${kunchinittu.code} → ${selectedWarehouse.code}`);
@@ -272,8 +272,8 @@ router.post('/', auth, async (req, res) => {
 
     } else if (movementType === 'shifting') {
       if (!fromKunchinintuId || !fromWarehouseId || !toKunchinintuId || !toWarehouseShiftId || !normalizedVariety) {
-        return res.status(400).json({ 
-          error: 'Shifting requires fromKunchinintuId, fromWarehouseId, toKunchinintuId, toWarehouseShiftId, and variety' 
+        return res.status(400).json({
+          error: 'Shifting requires fromKunchinintuId, fromWarehouseId, toKunchinintuId, toWarehouseShiftId, and variety'
         });
       }
 
@@ -307,14 +307,14 @@ router.post('/', auth, async (req, res) => {
         const fromWarehouse = await Warehouse.findByPk(fromWarehouseId, {
           attributes: ['name', 'code']
         });
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           error: `❌ SOURCE STOCK NOT FOUND\n\n` +
-                 `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu?.code}" does not contain "${normalizedVariety}" variety.\n` +
-                 `Cannot shift what doesn't exist in source.\n\n` +
-                 `Solution: Either:\n` +
-                 `1. Select a different source warehouse that has "${normalizedVariety}" variety, OR\n` +
-                 `2. Change the variety to match what's available in "${fromWarehouse?.code}".`
+            `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu?.code}" does not contain "${normalizedVariety}" variety.\n` +
+            `Cannot shift what doesn't exist in source.\n\n` +
+            `Solution: Either:\n` +
+            `1. Select a different source warehouse that has "${normalizedVariety}" variety, OR\n` +
+            `2. Change the variety to match what's available in "${fromWarehouse?.code}".`
         });
       }
 
@@ -363,14 +363,14 @@ router.post('/', auth, async (req, res) => {
         const fromWarehouse = await Warehouse.findByPk(fromWarehouseId, {
           attributes: ['name', 'code']
         });
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           error: `❌ INSUFFICIENT STOCK\n\n` +
-                 `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu?.code}" has only ${availableStock} bags of "${normalizedVariety}" variety available.\n` +
-                 `You are trying to shift ${bags} bags.\n\n` +
-                 `Solution: Either:\n` +
-                 `1. Reduce the quantity to ${availableStock} bags or less, OR\n` +
-                 `2. Select a different source warehouse with more stock.`
+            `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu?.code}" has only ${availableStock} bags of "${normalizedVariety}" variety available.\n` +
+            `You are trying to shift ${bags} bags.\n\n` +
+            `Solution: Either:\n` +
+            `1. Reduce the quantity to ${availableStock} bags or less, OR\n` +
+            `2. Select a different source warehouse with more stock.`
         });
       }
 
@@ -380,34 +380,34 @@ router.post('/', auth, async (req, res) => {
       const toKunchinittu = await Kunchinittu.findByPk(toKunchinintuId, {
         attributes: ['id', 'name', 'code', 'varietyId', 'warehouseId'],
         include: [
-          { 
-            model: Variety, 
-            as: 'variety', 
+          {
+            model: Variety,
+            as: 'variety',
             attributes: ['id', 'name'],
-            required: false 
+            required: false
           }
         ]
       });
 
       if (!toKunchinittu) {
-        return res.status(400).json({ 
-          error: '❌ Invalid destination Kunchinittu selected' 
+        return res.status(400).json({
+          error: '❌ Invalid destination Kunchinittu selected'
         });
       }
 
       // Check if destination Kunchinittu has allotted variety
       if (toKunchinittu.varietyId && toKunchinittu.variety) {
         const destAllottedVarietyNormalized = toKunchinittu.variety.name.trim().toUpperCase();
-        
+
         if (destAllottedVarietyNormalized !== normalizedVariety) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: `❌ DESTINATION VARIETY MISMATCH\n\n` +
-                   `Problem: Kunchinittu "${toKunchinittu.code}" is allotted to "${toKunchinittu.variety.name}" variety ONLY.\n` +
-                   `You are trying to shift "${normalizedVariety}" variety.\n\n` +
-                   `Solution: Select a destination Kunchinittu that is allotted to "${normalizedVariety}" variety.`
+              `Problem: Kunchinittu "${toKunchinittu.code}" is allotted to "${toKunchinittu.variety.name}" variety ONLY.\n` +
+              `You are trying to shift "${normalizedVariety}" variety.\n\n` +
+              `Solution: Select a destination Kunchinittu that is allotted to "${normalizedVariety}" variety.`
           });
         }
-        
+
         console.log(`✅ Destination Kunchinittu validation passed: ${normalizedVariety} matches allotted variety`);
       }
 
@@ -429,23 +429,23 @@ router.post('/', auth, async (req, res) => {
 
       if (destinationStock) {
         const destVarietyNormalized = destinationStock.variety.trim().toUpperCase();
-        
+
         if (destVarietyNormalized !== normalizedVariety) {
           const toWarehouse = await Warehouse.findByPk(toWarehouseShiftId, {
             attributes: ['name', 'code']
           });
-          
-          return res.status(400).json({ 
+
+          return res.status(400).json({
             error: `❌ DESTINATION VARIETY CONFLICT\n\n` +
-                   `Problem: Warehouse "${toWarehouse?.code}" in Kunchinittu "${toKunchinittu.code}" already contains "${destinationStock.variety}" variety.\n` +
-                   `You are trying to shift "${normalizedVariety}" variety.\n` +
-                   `Cannot mix different varieties in the same warehouse.\n\n` +
-                   `Solution: Either:\n` +
-                   `1. Select a warehouse that already has "${normalizedVariety}" variety, OR\n` +
-                   `2. Select an empty warehouse in a Kunchinittu allotted to "${normalizedVariety}".`
+              `Problem: Warehouse "${toWarehouse?.code}" in Kunchinittu "${toKunchinittu.code}" already contains "${destinationStock.variety}" variety.\n` +
+              `You are trying to shift "${normalizedVariety}" variety.\n` +
+              `Cannot mix different varieties in the same warehouse.\n\n` +
+              `Solution: Either:\n` +
+              `1. Select a warehouse that already has "${normalizedVariety}" variety, OR\n` +
+              `2. Select an empty warehouse in a Kunchinittu allotted to "${normalizedVariety}".`
           });
         }
-        
+
         console.log(`✅ Destination stock validation passed: ${normalizedVariety} matches existing stock`);
       } else {
         console.log(`✅ Destination is empty: ${normalizedVariety} can be shifted to new location`);
@@ -454,8 +454,8 @@ router.post('/', auth, async (req, res) => {
       console.log(`✅ SHIFTING CHAIN VALIDATION PASSED: ${normalizedVariety} from source to destination`);
     } else if (movementType === 'production-shifting') {
       if (!fromKunchinintuId || !fromWarehouseId || !outturnId || !normalizedVariety) {
-        return res.status(400).json({ 
-          error: 'Production shifting requires fromKunchinintuId, fromWarehouseId, outturnId, and variety' 
+        return res.status(400).json({
+          error: 'Production shifting requires fromKunchinintuId, fromWarehouseId, outturnId, and variety'
         });
       }
 
@@ -467,29 +467,29 @@ router.post('/', auth, async (req, res) => {
       const outturn = await Outturn.findByPk(outturnId, {
         attributes: ['id', 'code', 'allottedVariety']
       });
-      
+
       if (!outturn) {
-        return res.status(400).json({ 
-          error: '❌ Invalid outturn selected' 
+        return res.status(400).json({
+          error: '❌ Invalid outturn selected'
         });
       }
 
       const outturnVarietyNormalized = outturn.allottedVariety ? outturn.allottedVariety.trim().toUpperCase() : null;
-      
+
       if (!outturnVarietyNormalized) {
-        return res.status(400).json({ 
-          error: `❌ Outturn "${outturn.code}" has no allotted variety. Cannot process production shifting.` 
+        return res.status(400).json({
+          error: `❌ Outturn "${outturn.code}" has no allotted variety. Cannot process production shifting.`
         });
       }
 
       if (outturnVarietyNormalized !== normalizedVariety) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: `❌ OUTTURN VARIETY MISMATCH\n\n` +
-                 `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety ONLY.\n` +
-                 `You are trying to process "${normalizedVariety}" variety.\n\n` +
-                 `Solution: Either:\n` +
-                 `1. Change variety to "${outturn.allottedVariety}" to match this outturn, OR\n` +
-                 `2. Select a different outturn that is allotted to "${normalizedVariety}" variety.`
+            `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety ONLY.\n` +
+            `You are trying to process "${normalizedVariety}" variety.\n\n` +
+            `Solution: Either:\n` +
+            `1. Change variety to "${outturn.allottedVariety}" to match this outturn, OR\n` +
+            `2. Select a different outturn that is allotted to "${normalizedVariety}" variety.`
         });
       }
 
@@ -499,31 +499,31 @@ router.post('/', auth, async (req, res) => {
       const fromKunchinittu = await Kunchinittu.findByPk(fromKunchinintuId, {
         attributes: ['id', 'name', 'code', 'varietyId', 'warehouseId'],
         include: [
-          { 
-            model: Variety, 
-            as: 'variety', 
+          {
+            model: Variety,
+            as: 'variety',
             attributes: ['id', 'name'],
-            required: false 
+            required: false
           }
         ]
       });
 
       if (!fromKunchinittu) {
-        return res.status(400).json({ 
-          error: '❌ Invalid source Kunchinittu selected' 
+        return res.status(400).json({
+          error: '❌ Invalid source Kunchinittu selected'
         });
       }
 
       // Check if source Kunchinittu's allotted variety matches
       if (fromKunchinittu.varietyId && fromKunchinittu.variety) {
         const sourceAllottedVarietyNormalized = fromKunchinittu.variety.name.trim().toUpperCase();
-        
+
         if (sourceAllottedVarietyNormalized !== normalizedVariety) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             error: `❌ SOURCE VARIETY MISMATCH\n\n` +
-                   `Problem: Kunchinittu "${fromKunchinittu.code}" is allotted to "${fromKunchinittu.variety.name}" variety, not "${normalizedVariety}".\n` +
-                   `Cannot shift from this location.\n\n` +
-                   `Solution: Select a source Kunchinittu that is allotted to "${normalizedVariety}" variety.`
+              `Problem: Kunchinittu "${fromKunchinittu.code}" is allotted to "${fromKunchinittu.variety.name}" variety, not "${normalizedVariety}".\n` +
+              `Cannot shift from this location.\n\n` +
+              `Solution: Select a source Kunchinittu that is allotted to "${normalizedVariety}" variety.`
           });
         }
       }
@@ -551,12 +551,12 @@ router.post('/', auth, async (req, res) => {
         const fromWarehouse = await Warehouse.findByPk(fromWarehouseId, {
           attributes: ['name', 'code']
         });
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           error: `❌ SOURCE STOCK NOT FOUND\n\n` +
-                 `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu.code}" does not contain "${normalizedVariety}" variety.\n` +
-                 `Cannot shift for production what doesn't exist in source.\n\n` +
-                 `Solution: Select a source warehouse that has "${normalizedVariety}" variety in stock.`
+            `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu.code}" does not contain "${normalizedVariety}" variety.\n` +
+            `Cannot shift for production what doesn't exist in source.\n\n` +
+            `Solution: Select a source warehouse that has "${normalizedVariety}" variety in stock.`
         });
       }
 
@@ -602,26 +602,26 @@ router.post('/', auth, async (req, res) => {
         const fromWarehouse = await Warehouse.findByPk(fromWarehouseId, {
           attributes: ['name', 'code']
         });
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           error: `❌ INSUFFICIENT STOCK FOR PRODUCTION\n\n` +
-                 `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu.code}" has only ${prodAvailableStock} bags of "${normalizedVariety}" variety available.\n` +
-                 `You are trying to shift ${bags} bags for production.\n\n` +
-                 `Solution: Either:\n` +
-                 `1. Reduce the quantity to ${prodAvailableStock} bags or less, OR\n` +
-                 `2. Select a different source warehouse with more stock.`
+            `Problem: Warehouse "${fromWarehouse?.code}" in Kunchinittu "${fromKunchinittu.code}" has only ${prodAvailableStock} bags of "${normalizedVariety}" variety available.\n` +
+            `You are trying to shift ${bags} bags for production.\n\n` +
+            `Solution: Either:\n` +
+            `1. Reduce the quantity to ${prodAvailableStock} bags or less, OR\n` +
+            `2. Select a different source warehouse with more stock.`
         });
       }
 
       console.log(`✅ Stock quantity validation passed: ${bags} bags available for production (${prodAvailableStock} total)`);
       console.log(`✅ PRODUCTION SHIFTING CHAIN VALIDATION PASSED: ${normalizedVariety} → Outturn ${outturn.code}`);
     }
-    
+
     // Handle "For Production" purchase type (saved as purchase but goes directly to outturn)
     if (movementType === 'purchase' && purchaseType === 'for-production') {
       if (!outturnId || !normalizedVariety) {
-        return res.status(400).json({ 
-          error: 'For Production requires outturnId and variety' 
+        return res.status(400).json({
+          error: 'For Production requires outturnId and variety'
         });
       }
 
@@ -633,29 +633,29 @@ router.post('/', auth, async (req, res) => {
       const outturn = await Outturn.findByPk(outturnId, {
         attributes: ['id', 'code', 'allottedVariety']
       });
-      
+
       if (!outturn) {
-        return res.status(400).json({ 
-          error: '❌ Invalid outturn selected' 
+        return res.status(400).json({
+          error: '❌ Invalid outturn selected'
         });
       }
 
       const outturnVarietyNormalized = outturn.allottedVariety ? outturn.allottedVariety.trim().toUpperCase() : null;
-      
+
       if (!outturnVarietyNormalized) {
-        return res.status(400).json({ 
-          error: `❌ Outturn "${outturn.code}" has no allotted variety. Cannot process for production.` 
+        return res.status(400).json({
+          error: `❌ Outturn "${outturn.code}" has no allotted variety. Cannot process for production.`
         });
       }
 
       if (outturnVarietyNormalized !== normalizedVariety) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: `❌ OUTTURN VARIETY MISMATCH\n\n` +
-                 `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety ONLY.\n` +
-                 `You are trying to process "${normalizedVariety}" variety.\n\n` +
-                 `Solution: Either:\n` +
-                 `1. Change variety to "${outturn.allottedVariety}" to match this outturn, OR\n` +
-                 `2. Select a different outturn that is allotted to "${normalizedVariety}" variety.`
+            `Problem: Outturn "${outturn.code}" is allotted to "${outturn.allottedVariety}" variety ONLY.\n` +
+            `You are trying to process "${normalizedVariety}" variety.\n\n` +
+            `Solution: Either:\n` +
+            `1. Change variety to "${outturn.allottedVariety}" to match this outturn, OR\n` +
+            `2. Select a different outturn that is allotted to "${normalizedVariety}" variety.`
         });
       }
 
@@ -759,7 +759,7 @@ router.post('/', auth, async (req, res) => {
       toKunchinintuId,
       willTransfer: req.user.role === 'admin' && movementType === 'shifting' && fromKunchinintuId && toKunchinintuId
     });
-    
+
     if (req.user.role === 'admin' && movementType === 'shifting' && fromKunchinintuId && toKunchinintuId) {
       try {
         console.log('🔍 Admin created shifting - checking rate transfer:', {
@@ -767,16 +767,16 @@ router.post('/', auth, async (req, res) => {
           fromKunchinintuId,
           toKunchinintuId
         });
-        
+
         // IMPORTANT: Calculate source kunchinittu's average rate FIRST before transferring
         const { calculateKunchinintuAverageRate } = require('./purchase-rates');
         await calculateKunchinintuAverageRate(fromKunchinintuId);
         console.log(`✅ Calculated source kunchinittu ${fromKunchinintuId} average rate before transfer`);
-        
+
         // Retrieve source and destination kunchinittus (AFTER rate calculation)
         const sourceKunchinittu = await Kunchinittu.findByPk(fromKunchinintuId);
         const destKunchinittu = await Kunchinittu.findByPk(toKunchinintuId);
-        
+
         console.log('🔍 Source kunchinittu:', {
           id: sourceKunchinittu?.id,
           code: sourceKunchinittu?.code,
@@ -787,20 +787,20 @@ router.post('/', auth, async (req, res) => {
           code: destKunchinittu?.code,
           averageRate: destKunchinittu?.averageRate
         });
-        
+
         if (sourceKunchinittu && destKunchinittu && sourceKunchinittu.averageRate && sourceKunchinittu.averageRate > 0) {
           // SIMPLE DIRECT TRANSFER: Copy the source rate to destination
           const sourceRate = sourceKunchinittu.averageRate;
           const previousDestRate = destKunchinittu.averageRate || 0;
-          
+
           // Update destination kunchinittu with source rate
           await destKunchinittu.update({
             averageRate: sourceRate,
             lastRateCalculation: new Date()
           });
-          
+
           console.log(`✅ Rate transfer completed: ${sourceRate} → ${sourceRate} for kunchinittu ${toKunchinintuId}`);
-          
+
           // Log the rate transfer for audit
           try {
             const { logRateTransfer } = require('../services/AuditService');
@@ -831,7 +831,7 @@ router.post('/', auth, async (req, res) => {
         // Don't fail the main operation
       }
     }
-    
+
     // Transfer average rate if admin creates a production-shifting (auto-approved)
     if (req.user.role === 'admin' && movementType === 'production-shifting' && fromKunchinintuId && outturnId) {
       try {
@@ -840,16 +840,16 @@ router.post('/', auth, async (req, res) => {
           fromKunchinintuId,
           outturnId
         });
-        
+
         // Calculate source kunchinittu's average rate FIRST
         const { calculateKunchinintuAverageRate } = require('./purchase-rates');
         await calculateKunchinintuAverageRate(fromKunchinintuId);
         console.log(`✅ Calculated source kunchinittu ${fromKunchinintuId} average rate before transfer to outturn`);
-        
+
         // Retrieve source kunchinittu and outturn (AFTER rate calculation)
         const sourceKunchinittu = await Kunchinittu.findByPk(fromKunchinintuId);
         const outturn = await Outturn.findByPk(outturnId);
-        
+
         console.log('🔍 Source kunchinittu:', {
           id: sourceKunchinittu?.id,
           code: sourceKunchinittu?.code,
@@ -860,20 +860,20 @@ router.post('/', auth, async (req, res) => {
           code: outturn?.code,
           averageRate: outturn?.averageRate
         });
-        
+
         if (sourceKunchinittu && outturn && sourceKunchinittu.averageRate && sourceKunchinittu.averageRate > 0) {
           // SIMPLE DIRECT TRANSFER: Copy the source kunchinittu rate to outturn
           const sourceRate = sourceKunchinittu.averageRate;
           const previousOutturnRate = outturn.averageRate || 0;
-          
+
           // Update outturn with source kunchinittu's rate
           await outturn.update({
             averageRate: sourceRate,
             lastRateCalculation: new Date()
           });
-          
+
           console.log(`✅ Rate transfer to outturn completed: ${sourceRate} → ${sourceRate} for outturn ${outturnId}`);
-          
+
           // Log the rate transfer for audit
           try {
             const { logRateTransfer } = require('../services/AuditService');
@@ -904,11 +904,11 @@ router.post('/', auth, async (req, res) => {
         // Don't fail the main operation
       }
     }
-    
+
     // Invalidate dashboard cache after creating arrival
     await cacheService.delPattern('dashboard:*');
     await cacheService.delPattern('stock:*');
-    
+
     // If this is a production-shifting or purchase arrival with an outturn, recalculate yield
     if (outturnId && (movementType === 'production-shifting' || movementType === 'purchase')) {
       try {
@@ -919,7 +919,7 @@ router.post('/', auth, async (req, res) => {
         // Don't fail the request if yield calculation fails
       }
     }
-    
+
     res.status(201).json({
       message: 'Arrival created successfully',
       arrival: createdArrival
@@ -933,7 +933,7 @@ router.post('/', auth, async (req, res) => {
 // Get all arrivals with pagination and filters - OPTIMIZED
 router.get('/', auth, async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const {
       page = 1,
@@ -952,7 +952,7 @@ router.get('/', auth, async (req, res) => {
       dateTo,
       search
     };
-    
+
     // Staff can only see their own entries
     if (req.user.role === 'staff') {
       filters.createdBy = req.user.userId;
@@ -964,7 +964,7 @@ router.get('/', auth, async (req, res) => {
       parseInt(page),
       parseInt(limit)
     );
-    
+
     const responseTime = Date.now() - startTime;
 
     res.json({
@@ -975,15 +975,15 @@ router.get('/', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Get arrivals error:', error);
-    
+
     // Handle timeout errors
     if (error.name === 'SequelizeTimeoutError') {
-      return res.status(504).json({ 
+      return res.status(504).json({
         error: 'Query timeout - please refine your filters',
         suggestion: 'Try narrowing the date range or adding more specific filters'
       });
     }
-    
+
     res.status(500).json({ error: 'Failed to fetch arrivals' });
   }
 });
@@ -1082,7 +1082,7 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
       console.error('Error updating kunchinittu average rate after admin approval:', error);
       // Don't fail the main operation
     }
-    
+
     // Transfer average rate for kunchinittu-to-kunchinittu shifting
     try {
       if (arrival.movementType === 'shifting' && arrival.fromKunchinintuId && arrival.toKunchinintuId) {
@@ -1091,16 +1091,16 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
           fromKunchinintuId: arrival.fromKunchinintuId,
           toKunchinintuId: arrival.toKunchinintuId
         });
-        
+
         // IMPORTANT: Calculate source kunchinittu's average rate FIRST before transferring
         const { calculateKunchinintuAverageRate } = require('./purchase-rates');
         await calculateKunchinintuAverageRate(arrival.fromKunchinintuId);
         console.log(`✅ Calculated source kunchinittu ${arrival.fromKunchinintuId} average rate before transfer`);
-        
+
         // Retrieve source and destination kunchinittus (AFTER rate calculation)
         const sourceKunchinittu = await Kunchinittu.findByPk(arrival.fromKunchinintuId);
         const destKunchinittu = await Kunchinittu.findByPk(arrival.toKunchinintuId);
-        
+
         console.log('🔍 Source kunchinittu:', {
           id: sourceKunchinittu?.id,
           code: sourceKunchinittu?.code,
@@ -1111,25 +1111,25 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
           code: destKunchinittu?.code,
           averageRate: destKunchinittu?.averageRate
         });
-        
+
         if (sourceKunchinittu && destKunchinittu && sourceKunchinittu.averageRate && sourceKunchinittu.averageRate > 0) {
           // SIMPLE DIRECT TRANSFER: Copy the source rate to destination
           const sourceRate = sourceKunchinittu.averageRate;
           const previousDestRate = destKunchinittu.averageRate || 0;
-          
+
           // Update destination kunchinittu with source rate
           await destKunchinittu.update({
             averageRate: sourceRate,
             lastRateCalculation: new Date()
           });
-          
+
           console.log(`✅ Rate transfer completed: ${sourceRate} → ${sourceRate} for kunchinittu ${arrival.toKunchinintuId}`);
           console.log('🔍 Updated destination kunchinittu:', {
             id: destKunchinittu.id,
             code: destKunchinittu.code,
             newAverageRate: sourceRate
           });
-          
+
           // Log the rate transfer for audit
           try {
             const { logRateTransfer } = require('../services/AuditService');
@@ -1161,7 +1161,7 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
       console.error('Error stack:', error.stack);
       // Don't fail the main operation
     }
-    
+
     // Transfer average rate for production-shifting (kunchinittu to outturn)
     try {
       if (arrival.movementType === 'production-shifting' && arrival.fromKunchinintuId && arrival.outturnId) {
@@ -1170,16 +1170,16 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
           fromKunchinintuId: arrival.fromKunchinintuId,
           outturnId: arrival.outturnId
         });
-        
+
         // Calculate source kunchinittu's average rate FIRST
         const { calculateKunchinintuAverageRate } = require('./purchase-rates');
         await calculateKunchinintuAverageRate(arrival.fromKunchinintuId);
         console.log(`✅ Calculated source kunchinittu ${arrival.fromKunchinintuId} average rate before transfer to outturn`);
-        
+
         // Retrieve source kunchinittu and outturn (AFTER rate calculation)
         const sourceKunchinittu = await Kunchinittu.findByPk(arrival.fromKunchinintuId);
         const outturn = await Outturn.findByPk(arrival.outturnId);
-        
+
         console.log('🔍 Source kunchinittu:', {
           id: sourceKunchinittu?.id,
           code: sourceKunchinittu?.code,
@@ -1190,20 +1190,20 @@ router.patch('/:id/admin-approve', auth, authorize('admin'), async (req, res) =>
           code: outturn?.code,
           averageRate: outturn?.averageRate
         });
-        
+
         if (sourceKunchinittu && outturn && sourceKunchinittu.averageRate && sourceKunchinittu.averageRate > 0) {
           // SIMPLE DIRECT TRANSFER: Copy the source kunchinittu rate to outturn
           const sourceRate = sourceKunchinittu.averageRate;
           const previousOutturnRate = outturn.averageRate || 0;
-          
+
           // Update outturn with source kunchinittu's rate
           await outturn.update({
             averageRate: sourceRate,
             lastRateCalculation: new Date()
           });
-          
+
           console.log(`✅ Rate transfer to outturn completed: ${sourceRate} → ${sourceRate} for outturn ${arrival.outturnId}`);
-          
+
           // Log the rate transfer for audit
           try {
             const { logRateTransfer } = require('../services/AuditService');
@@ -1274,7 +1274,7 @@ router.put('/:id', auth, authorize('manager', 'admin'), async (req, res) => {
 
     // Find the arrival
     const arrival = await Arrival.findByPk(id);
-    
+
     if (!arrival) {
       return res.status(404).json({ error: 'Arrival not found' });
     }
@@ -1339,7 +1339,7 @@ router.put('/:id', auth, authorize('manager', 'admin'), async (req, res) => {
     console.error('Update arrival error:', error);
     console.error('Error details:', error.message);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to update arrival',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
@@ -1353,7 +1353,7 @@ router.delete('/:id', auth, authorize('manager', 'admin'), async (req, res) => {
 
     // Find the arrival
     const arrival = await Arrival.findByPk(id);
-    
+
     if (!arrival) {
       return res.status(404).json({ error: 'Arrival not found' });
     }
@@ -1370,8 +1370,8 @@ router.delete('/:id', auth, authorize('manager', 'admin'), async (req, res) => {
 
     // Check if this arrival is linked to any outturn records
     if (arrival.outturnId) {
-      return res.status(400).json({ 
-        error: 'Cannot delete arrival that is linked to an outturn record. Please delete the outturn record first.' 
+      return res.status(400).json({
+        error: 'Cannot delete arrival that is linked to an outturn record. Please delete the outturn record first.'
       });
     }
 
@@ -1406,11 +1406,11 @@ router.delete('/:id', auth, authorize('manager', 'admin'), async (req, res) => {
   }
 });
 
-// Get pending approvals list (for managers and admins)
+// Get pending approvals list (for managers and admins) - OPTIMIZED for 10 lakh records
 router.get('/pending-list', auth, authorize(['manager', 'admin']), async (req, res) => {
   try {
     const where = {};
-    
+
     // Managers see pending records (awaiting manager approval)
     // Admins see approved records waiting for admin approval
     if (req.user.role === 'manager') {
@@ -1422,6 +1422,7 @@ router.get('/pending-list', auth, authorize(['manager', 'admin']), async (req, r
 
     const arrivals = await Arrival.findAll({
       where,
+      attributes: ['id', 'slNo', 'date', 'movementType', 'variety', 'bags', 'netWeight', 'status', 'createdAt'], // Select only needed columns
       include: [
         { model: User, as: 'creator', attributes: ['username', 'role'] },
         { model: User, as: 'approver', attributes: ['username', 'role'] },
@@ -1431,7 +1432,8 @@ router.get('/pending-list', auth, authorize(['manager', 'admin']), async (req, r
         { model: Warehouse, as: 'toWarehouseShift', attributes: ['name', 'code'] },
         { model: Kunchinittu, as: 'fromKunchinittu', attributes: ['name', 'code'] }
       ],
-      order: [['date', 'ASC'], ['createdAt', 'ASC']]
+      order: [['date', 'ASC'], ['createdAt', 'ASC']],
+      limit: 500 // Safety limit for 10 lakh record performance
     });
 
     res.json({
@@ -1448,7 +1450,7 @@ router.get('/pending-list', auth, authorize(['manager', 'admin']), async (req, r
 // Bulk approve arrivals - OPTIMIZED with batch processing
 router.post('/bulk-approve', auth, authorize(['manager', 'admin']), async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const { arrivalIds } = req.body;
 
@@ -1462,7 +1464,7 @@ router.post('/bulk-approve', auth, authorize(['manager', 'admin']), async (req, 
       req.user.userId,
       req.user.role
     );
-    
+
     const responseTime = Date.now() - startTime;
 
     res.json({
