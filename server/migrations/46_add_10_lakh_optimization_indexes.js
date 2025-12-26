@@ -4,6 +4,8 @@
  * This migration adds comprehensive indexes for handling 1 million+ records
  * with high performance. Indexes are created for the arrivals table which
  * is the most heavily queried table.
+ * 
+ * NOTE: Using regular CREATE INDEX (not CONCURRENTLY) for cloud compatibility
  */
 
 const { sequelize } = require('../config/database');
@@ -11,47 +13,48 @@ const { sequelize } = require('../config/database');
 async function up() {
     console.log('🚀 Running 10 Lakh Record Performance Optimization...');
 
+    // Using regular CREATE INDEX (not CONCURRENTLY) for cloud deployment compatibility
+    // CONCURRENTLY cannot be used inside a transaction
     const indexes = [
         // ====== ARRIVALS TABLE INDEXES ======
         // Primary date index - most queries filter by date
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_date ON arrivals(date DESC);',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_year_month ON arrivals(EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date));',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_date ON arrivals(date DESC);',
 
         // Status indexes - frequently filtered
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_status ON arrivals(status);',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_admin_approved ON arrivals("adminApprovedBy");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_status ON arrivals(status);',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_admin_approved ON arrivals("adminApprovedBy");',
 
         // Movement type index
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_movement_type ON arrivals("movementType");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_movement_type ON arrivals("movementType");',
 
         // Variety index
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_variety ON arrivals(variety);',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_variety ON arrivals(variety);',
 
         // Location foreign key indexes
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_to_kunchinittu ON arrivals("toKunchinintuId");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_from_kunchinittu ON arrivals("fromKunchinintuId");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_to_warehouse ON arrivals("toWarehouseId");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_from_warehouse ON arrivals("fromWarehouseId");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_to_warehouse_shift ON arrivals("toWarehouseShiftId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_to_kunchinittu ON arrivals("toKunchinintuId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_from_kunchinittu ON arrivals("fromKunchinintuId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_to_warehouse ON arrivals("toWarehouseId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_from_warehouse ON arrivals("fromWarehouseId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_to_warehouse_shift ON arrivals("toWarehouseShiftId");',
 
         // Outturn index for production tracking
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_outturn ON arrivals("outturnId");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_from_outturn ON arrivals("fromOutturnId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_outturn ON arrivals("outturnId");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_from_outturn ON arrivals("fromOutturnId");',
 
         // User tracking indexes
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_created_by ON arrivals("createdBy");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_approved_by ON arrivals("approvedBy");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_created_by ON arrivals("createdBy");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_approved_by ON arrivals("approvedBy");',
 
         // ====== COMPOSITE INDEXES FOR COMMON QUERY PATTERNS ======
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_date_status ON arrivals(date DESC, status);',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_movement_status_date ON arrivals("movementType", status, date DESC);',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_kunchinittu_date ON arrivals("toKunchinintuId", date DESC);',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_date_status ON arrivals(date DESC, status);',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_movement_status_date ON arrivals("movementType", status, date DESC);',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_kunchinittu_date ON arrivals("toKunchinintuId", date DESC);',
 
         // ====== TEXT SEARCH INDEXES ======
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_sl_no ON arrivals("slNo");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_wb_no ON arrivals("wbNo");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_lorry_number ON arrivals("lorryNumber");',
-        'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arrivals_broker ON arrivals(broker);'
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_sl_no ON arrivals("slNo");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_wb_no ON arrivals("wbNo");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_lorry_number ON arrivals("lorryNumber");',
+        'CREATE INDEX IF NOT EXISTS idx_arrivals_broker ON arrivals(broker);'
     ];
 
     let successCount = 0;
