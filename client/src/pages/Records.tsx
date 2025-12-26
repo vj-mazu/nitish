@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
 import { toast } from '../utils/toast';
@@ -789,6 +789,7 @@ const Records: React.FC = () => {
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState(''); // Debounced for API calls
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -954,23 +955,41 @@ const Records: React.FC = () => {
   const [byProductPage, setByProductPage] = useState(1);
   const byProductsPerPage = 10;
 
-  // Filtered and paginated by-products
-  const filteredByProducts = byProducts.filter((bp: any) => {
-    if (!byProductSearch) return true;
-    const searchLower = byProductSearch.toLowerCase();
-    const dateStr = new Date(bp.date).toLocaleDateString('en-GB').toLowerCase();
-    return dateStr.includes(searchLower);
-  });
+  // Filtered and paginated by-products - MEMOIZED for performance
+  const filteredByProducts = useMemo(() => {
+    return byProducts.filter((bp: any) => {
+      if (!byProductSearch) return true;
+      const searchLower = byProductSearch.toLowerCase();
+      const dateStr = new Date(bp.date).toLocaleDateString('en-GB').toLowerCase();
+      return dateStr.includes(searchLower);
+    });
+  }, [byProducts, byProductSearch]);
 
-  const totalByProductPages = Math.ceil(filteredByProducts.length / byProductsPerPage);
-  const paginatedByProducts = filteredByProducts.slice(
-    (byProductPage - 1) * byProductsPerPage,
-    byProductPage * byProductsPerPage
+  const totalByProductPages = useMemo(() =>
+    Math.ceil(filteredByProducts.length / byProductsPerPage),
+    [filteredByProducts.length, byProductsPerPage]
   );
+
+  const paginatedByProducts = useMemo(() =>
+    filteredByProducts.slice(
+      (byProductPage - 1) * byProductsPerPage,
+      byProductPage * byProductsPerPage
+    ),
+    [filteredByProducts, byProductPage, byProductsPerPage]
+  );
+
+  // Debounce search input for performance with 10 lakh records
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 500); // 500ms delay before API call
+
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     fetchRecords();
-  }, [activeTab, page, dateFrom, dateTo, search, showAllRecords, selectedMonth]);
+  }, [activeTab, page, dateFrom, dateTo, debouncedSearch, showAllRecords, selectedMonth]);
 
   // Auto-fetch when month changes for paddy stock
   useEffect(() => {

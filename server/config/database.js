@@ -32,12 +32,12 @@ const sequelize = dbUrl
       application_name: 'mother_india_stock_mgmt'
     },
     pool: {
-      max: 20,
-      min: 5,
+      max: 50,  // Increased for 10 lakh records handling
+      min: 10,  // Higher minimum for faster response under load
       acquire: 60000,
       idle: 10000,
       evict: 1000,
-      maxUses: 1000
+      maxUses: 2000  // Increased for high-volume operations
     },
     define: {
       timestamps: true,
@@ -58,12 +58,12 @@ const sequelize = dbUrl
 
     // Connection pool configuration for better performance
     pool: {
-      max: 20,
-      min: 5,
+      max: 50,  // Increased for 10 lakh records handling
+      min: 10,  // Higher minimum for faster response under load
       acquire: 60000,
       idle: 10000,
       evict: 1000,
-      maxUses: 1000
+      maxUses: 2000  // Increased for high-volume operations
     },
 
     // Query optimization settings
