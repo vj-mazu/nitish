@@ -4,10 +4,14 @@ async function up() {
   console.log('🔄 Fixing Rice Hamali rates with exact data from images...');
 
   try {
-    // Check if rates already exist - skip migration if they do (data is already correct from migration 36)
+    // ALWAYS skip this migration - data is already correct from migration 36
+    // This migration was causing FK constraint errors due to DELETE
     const [existingRates] = await sequelize.query('SELECT COUNT(*) as count FROM rice_hamali_rates');
-    if (existingRates[0].count >= 60) {
-      console.log('✅ Rice hamali rates already populated (count: ' + existingRates[0].count + '), skipping migration');
+    const count = parseInt(existingRates[0].count) || 0;
+
+    // Skip if ANY rates exist (not just >= 60)
+    if (count > 0) {
+      console.log('✅ Rice hamali rates already exist (count: ' + count + '), skipping migration 37');
       return;
     }
 
