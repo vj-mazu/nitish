@@ -230,47 +230,54 @@ export const generateArrivalsPDF = (
 };
 
 /**
- * Generate PDF for Purchase tab - PORTRAIT MODE - Pixel perfect match
- * Reorders columns and reduces font to 15-column capacity (5.5pt)
+ * Generate PDF for Purchase tab - PORTRAIT MODE with very small font
+ * 18 columns optimized for portrait A4 with no word-wrapping
  */
 export const generatePurchasePDF = (
     records: any[],
     options: PDFOptions
 ): void => {
-    console.log(`📊 PDF Export: Processing ${records.length} Purchase records (PORTRAIT-OPTIMIZED)`);
+    console.log(`📊 PDF Export: Processing ${records.length} Purchase records (PORTRAIT-COMPACT)`);
 
+    // PORTRAIT orientation with minimal margins
     const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4'
     });
 
-    addHeader(doc, { ...options, title: options.title || 'Purchase Records' }, records.length, 'portrait');
+    addHeader(doc, { ...options, title: options.title || 'Purchase Records Report' }, records.length, 'portrait');
 
-    // Exactly match frontend columns (15 columns for portrait A4)
+    // 18 columns for portrait A4 (210mm - 10mm margins = 200mm usable)
+    // Prioritize last 3 columns (Amount, Total, Rate) with more width
     const columns: ColumnDef[] = [
-        { header: 'Sl', dataKey: 'slNo', width: 7, halign: 'center' },
-        { header: 'Date', dataKey: 'date', width: 14, halign: 'center' },
-        { header: 'Type', dataKey: 'type', width: 12, halign: 'center' },
-        { header: 'Broker', dataKey: 'broker', width: 15 },
-        { header: 'From', dataKey: 'from', width: 15 },
-        { header: 'To', dataKey: 'to', width: 15 },
-        { header: 'Variety', dataKey: 'variety', width: 16 },
-        { header: 'Bags', dataKey: 'bags', width: 9, halign: 'center' },
-        { header: 'M%', dataKey: 'moisture', width: 8, halign: 'center' },
-        { header: 'Cut', dataKey: 'cutting', width: 8, halign: 'center' },
-        { header: 'WB', dataKey: 'wbNo', width: 10, halign: 'center' },
-        { header: 'Net', dataKey: 'netWeight', width: 12, halign: 'center' },
-        { header: 'Lorry', dataKey: 'lorryNumber', width: 14, halign: 'center' },
-        { header: 'Rate/Q', dataKey: 'avgRate', width: 12, halign: 'center' },
-        { header: 'Amount', dataKey: 'totalAmount', width: 18, halign: 'right' }
+        { header: 'Sl', dataKey: 'slNo', width: 5, halign: 'center' },
+        { header: 'Date', dataKey: 'date', width: 11, halign: 'center' },
+        { header: 'Type', dataKey: 'type', width: 8, halign: 'center' },
+        { header: 'Broker', dataKey: 'broker', width: 12, halign: 'center' },
+        { header: 'From', dataKey: 'from', width: 8, halign: 'center' },
+        { header: 'To', dataKey: 'to', width: 10, halign: 'center' },
+        { header: 'Variety', dataKey: 'variety', width: 10, halign: 'center' },
+        { header: 'Bags', dataKey: 'bags', width: 7, halign: 'center' },
+        { header: 'M%', dataKey: 'moisture', width: 7, halign: 'center' },
+        { header: 'Cut', dataKey: 'cutting', width: 7, halign: 'center' },
+        { header: 'WB', dataKey: 'wbNo', width: 8, halign: 'center' },
+        { header: 'Gross', dataKey: 'grossWeight', width: 11, halign: 'center' },
+        { header: 'Tare', dataKey: 'tareWeight', width: 9, halign: 'center' },
+        { header: 'Net', dataKey: 'netWeight', width: 11, halign: 'center' },
+        { header: 'Lorry', dataKey: 'lorryNumber', width: 11, halign: 'center' },
+        { header: 'Amount', dataKey: 'amountFormula', width: 20, halign: 'center' },
+        { header: 'Total', dataKey: 'totalAmount', width: 18, halign: 'center' },
+        { header: 'Rate', dataKey: 'avgRate', width: 13, halign: 'center' }
     ];
 
     const tableData = processInChunks(records, (record, index) => {
         const purchaseRate = record.purchaseRate || {};
         const totalAmount = purchaseRate.totalAmount || record.totalAmount || 0;
         const avgRate = purchaseRate.averageRate || record.averageRate || 0;
+        const amountFormula = purchaseRate.amountFormula || record.amountFormula || '';
 
+        // Compact destination display
         const destination = record.outturnId
             ? `P(${record.outturn?.code || 'OUT'})`
             : record.toKunchinittu?.code && record.toWarehouse?.code
@@ -280,24 +287,88 @@ export const generatePurchasePDF = (
         return {
             slNo: index + 1,
             date: formatDate(record.date),
-            type: record.movementType === 'purchase' ? 'Purch' : 'Other',
-            broker: truncateText(record.broker || '-', 12),
-            from: truncateText(record.fromLocation || '-', 12),
-            to: truncateText(destination, 12),
-            variety: truncateText(record.variety || '-', 14),
+            type: 'Purchase',
+            broker: record.broker || '-',
+            from: record.fromLocation || '-',
+            to: destination,
+            variety: record.variety || '-',
             bags: record.bags || 0,
             moisture: record.moisture ? `${record.moisture}%` : '-',
             cutting: record.cutting || '-',
             wbNo: record.wbNo || '-',
+            grossWeight: formatNumber(record.grossWeight),
+            tareWeight: formatNumber(record.tareWeight),
             netWeight: formatNumber(record.netWeight),
-            lorryNumber: truncateText(record.lorryNumber || '-', 10),
-            avgRate: avgRate > 0 ? `₹${Number(avgRate).toFixed(0)}` : '-',
-            totalAmount: totalAmount > 0 ? `₹${Number(totalAmount).toLocaleString()}` : '-'
+            lorryNumber: record.lorryNumber || '-',
+            amountFormula: amountFormula || '-',
+            totalAmount: totalAmount > 0 ? `₹${Number(totalAmount).toLocaleString('en-IN')}` : '-',
+            avgRate: avgRate > 0 ? `₹${Number(avgRate).toFixed(0)}` : '-'
         };
     });
 
-    // Generate table with smaller font for 15-column support
-    generateOptimizedTable(doc, columns, tableData, 35, records, 'portrait');
+    // Generate table with AUTO column sizing - columns adjust to content
+    autoTable(doc, {
+        startY: 35,
+        head: [columns.map(c => c.header)],
+        body: tableData.map((row) => columns.map(c => (row as any)[c.dataKey])),
+        theme: 'grid',
+        styles: {
+            fontSize: 5, // Small font for 18 columns
+            cellPadding: 1.5,
+            lineWidth: 0.1,
+            lineColor: [200, 200, 200],
+            overflow: 'linebreak', // Wrap text so no data is lost
+            halign: 'center', // Center all data
+            valign: 'middle'
+        },
+        headStyles: {
+            fillColor: HEADER_BG,
+            textColor: HEADER_TEXT,
+            fontSize: 5.5,
+            fontStyle: 'bold',
+            halign: 'center',
+            valign: 'middle',
+            cellPadding: 2
+        },
+        alternateRowStyles: {
+            fillColor: ALTERNATE_ROW
+        },
+        columnStyles: {
+            // Fixed small columns  
+            0: { cellWidth: 6, halign: 'center' },  // Sl
+            1: { cellWidth: 12, halign: 'center' }, // Date
+            2: { cellWidth: 10, halign: 'center' }, // Type
+            3: { cellWidth: 14, halign: 'center' }, // Broker
+            4: { cellWidth: 10, halign: 'center' }, // From
+            5: { cellWidth: 12, halign: 'center' }, // To
+            6: { cellWidth: 14, halign: 'center' }, // Variety
+            7: { cellWidth: 8, halign: 'center' },  // Bags
+            8: { cellWidth: 8, halign: 'center' },  // M%
+            9: { cellWidth: 8, halign: 'center' },  // Cut
+            10: { cellWidth: 10, halign: 'center' }, // WB
+            11: { cellWidth: 12, halign: 'center' }, // Gross
+            12: { cellWidth: 10, halign: 'center' }, // Tare
+            13: { cellWidth: 12, halign: 'center' }, // Net
+            14: { cellWidth: 14, halign: 'center' }, // Lorry
+            15: { cellWidth: 'auto', halign: 'center' }, // Amount - AUTO SIZE
+            16: { cellWidth: 'auto', halign: 'center' }, // Total - AUTO SIZE
+            17: { cellWidth: 'auto', halign: 'center' }  // Rate - AUTO SIZE
+        },
+        margin: { left: 5, right: 5 },
+        tableWidth: 'auto', // Let table auto-size
+        didDrawCell: (cellData: any) => {
+            // Color code rows based on movement type
+            if (records && cellData.section === 'body') {
+                const record = records[cellData.row.index];
+                if (record) {
+                    const mvmtType = (record.movementType || record.movement_type || '').toLowerCase();
+                    if (mvmtType === 'purchase') {
+                        cellData.cell.styles.fillColor = GREEN_BG;
+                    }
+                }
+            }
+        }
+    });
 
     // Add totals
     const totalBags = records.reduce((sum, r) => sum + (r.bags || 0), 0);
@@ -307,12 +378,11 @@ export const generatePurchasePDF = (
         return sum + (parseFloat(rate.totalAmount || r.totalAmount) || 0);
     }, 0);
 
-    const summaryY = (doc as any).lastAutoTable.finalY + 8;
     addSummary(doc, [
         { label: 'Total Records', value: records.length.toString() },
         { label: 'Total Bags', value: totalBags.toLocaleString() },
         { label: 'Total Weight', value: `${formatNumber(totalWeight)} kg` },
-        { label: 'Total Amount', value: `₹${Number(totalAmount).toLocaleString()}` }
+        { label: 'Total Amount', value: `₹${Number(totalAmount).toLocaleString('en-IN')}` }
     ], 'portrait');
 
     addFooter(doc, options, 'portrait');
