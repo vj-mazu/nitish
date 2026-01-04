@@ -156,23 +156,23 @@ router.get('/outturn/:id/available-bags', auth, async (req, res) => {
 
     console.log('📊 Total paddy bags found:', productionShiftingBags);
 
-    // Get total bags ENTERED BY USER (this is what user types in the form)
-    const usedBags = await RiceProduction.sum('bags', {
+    // Get total paddy bags already DEDUCTED from productions
+    const usedPaddyBagsDeducted = await RiceProduction.sum('paddyBagsDeducted', {
       where: {
         outturnId: outturnId,
         status: { [Op.in]: ['pending', 'approved'] }
       }
     }) || 0;
 
-    console.log('📊 Used bags (entered by user):', usedBags);
+    console.log('📊 Used paddy bags (deducted):', usedPaddyBagsDeducted);
 
-    // Calculate available bags (Total - Bags Entered by User)
-    const availableBags = productionShiftingBags - usedBags;
+    // Calculate available bags (Total - Paddy Bags Deducted)
+    const availableBags = productionShiftingBags - usedPaddyBagsDeducted;
 
     res.json({
       availableBags,
       totalBags: productionShiftingBags,
-      usedBags,
+      usedBags: usedPaddyBagsDeducted,
       isCleared: false
     });
   } catch (error) {
@@ -217,24 +217,23 @@ router.get('/outturn/:id/available-paddy-bags', auth, async (req, res) => {
 
     console.log('📊 Total paddy bags found:', totalPaddyBags);
 
-    // Get total bags ENTERED BY USER (this is what user types in the form)
-    // NOT paddyBagsDeducted - that's for internal calculation only
-    const usedBags = await RiceProduction.sum('bags', {
+    // Get total paddy bags already DEDUCTED from productions
+    const usedPaddyBagsDeducted = await RiceProduction.sum('paddyBagsDeducted', {
       where: {
         outturnId: outturnId,
         status: { [Op.in]: ['pending', 'approved'] }
       }
     }) || 0;
 
-    console.log('📊 Used paddy bags:', usedBags);
+    console.log('📊 Used paddy bags (deducted):', usedPaddyBagsDeducted);
 
-    // Calculate available paddy bags (Total Paddy - Used Paddy)
-    const availablePaddyBags = totalPaddyBags - usedBags;
+    // Calculate available paddy bags (Total Paddy - Already Deducted)
+    const availablePaddyBags = totalPaddyBags - usedPaddyBagsDeducted;
 
     res.json({
       availablePaddyBags,
       totalPaddyBags,
-      usedPaddyBags: usedBags, // Return as usedPaddyBags for backward compatibility
+      usedPaddyBags: usedPaddyBagsDeducted, // Return deducted bags for frontend
       isCleared: false
     });
   } catch (error) {
@@ -341,23 +340,24 @@ router.post('/', auth, async (req, res) => {
       }
     }) || 0;
 
-    // Get total bags ENTERED BY USER
-    const usedBags = await RiceProduction.sum('bags', {
+    // Get total paddy bags already DEDUCTED (not user-entered bags)
+    const usedPaddyBagsDeducted = await RiceProduction.sum('paddyBagsDeducted', {
       where: {
         outturnId: finalOutturnId,
         status: { [Op.in]: ['pending', 'approved'] }
       }
     }) || 0;
 
-    // Calculate available bags (Total - Bags Entered)
-    const availablePaddyBags = totalPaddyBags - usedBags;
+    // Calculate available paddy bags (Total - Already Deducted)
+    const availablePaddyBags = totalPaddyBags - usedPaddyBagsDeducted;
 
-    // Check if requested bags exceed available
-    if (bags > availablePaddyBags) {
+    // Check if NEW paddyBagsDeducted would exceed available paddy bags
+    // FIX: Compare deducted bags, not user-entered bags
+    if (paddyBagsDeducted > availablePaddyBags) {
       return res.status(400).json({
-        error: `Insufficient bags available. Available: ${availablePaddyBags} bags, Required: ${bags} bags`,
+        error: `Insufficient paddy bags available. Available: ${availablePaddyBags} bags, Required: ${paddyBagsDeducted} bags (for ${bags} rice bags)`,
         availablePaddyBags,
-        requiredPaddyBags: bags
+        requiredPaddyBags: paddyBagsDeducted
       });
     }
 
@@ -607,7 +607,8 @@ router.put('/:id', auth, async (req, res) => {
         }
       }) || 0;
 
-      const usedBags = await RiceProduction.sum('bags', {
+      // Get total paddy bags already DEDUCTED (excluding current production)
+      const usedPaddyBagsDeducted = await RiceProduction.sum('paddyBagsDeducted', {
         where: {
           outturnId: production.outturnId,
           status: { [Op.in]: ['pending', 'approved'] },
@@ -615,13 +616,14 @@ router.put('/:id', auth, async (req, res) => {
         }
       }) || 0;
 
-      const availablePaddyBags = totalPaddyBags - usedBags;
+      const availablePaddyBags = totalPaddyBags - usedPaddyBagsDeducted;
 
-      if (finalBags > availablePaddyBags) {
+      // FIX: Compare deducted bags, not user-entered bags
+      if (paddyBagsDeducted > availablePaddyBags) {
         return res.status(400).json({
-          error: `Insufficient bags available. Available: ${availablePaddyBags} bags, Required: ${finalBags} bags`,
+          error: `Insufficient paddy bags available. Available: ${availablePaddyBags} bags, Required: ${paddyBagsDeducted} bags (for ${finalBags} rice bags)`,
           availablePaddyBags,
-          requiredPaddyBags: finalBags
+          requiredPaddyBags: paddyBagsDeducted
         });
       }
     }
