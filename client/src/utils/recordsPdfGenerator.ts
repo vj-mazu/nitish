@@ -334,28 +334,28 @@ export const generatePurchasePDF = (
             fillColor: ALTERNATE_ROW
         },
         columnStyles: {
-            // Fixed small columns  
-            0: { cellWidth: 6, halign: 'center' },  // Sl
-            1: { cellWidth: 12, halign: 'center' }, // Date
-            2: { cellWidth: 10, halign: 'center' }, // Type
-            3: { cellWidth: 14, halign: 'center' }, // Broker
-            4: { cellWidth: 10, halign: 'center' }, // From
-            5: { cellWidth: 12, halign: 'center' }, // To
-            6: { cellWidth: 14, halign: 'center' }, // Variety
-            7: { cellWidth: 8, halign: 'center' },  // Bags
-            8: { cellWidth: 8, halign: 'center' },  // M%
-            9: { cellWidth: 8, halign: 'center' },  // Cut
-            10: { cellWidth: 10, halign: 'center' }, // WB
-            11: { cellWidth: 12, halign: 'center' }, // Gross
-            12: { cellWidth: 10, halign: 'center' }, // Tare
-            13: { cellWidth: 12, halign: 'center' }, // Net
-            14: { cellWidth: 14, halign: 'center' }, // Lorry
-            15: { cellWidth: 'auto', halign: 'center' }, // Amount - AUTO SIZE
-            16: { cellWidth: 'auto', halign: 'center' }, // Total - AUTO SIZE
-            17: { cellWidth: 'auto', halign: 'center' }  // Rate - AUTO SIZE
+            // Very compact fixed columns (total: ~115mm) to leave ~75mm for last 3 auto columns
+            0: { cellWidth: 5, halign: 'center' },   // Sl
+            1: { cellWidth: 10, halign: 'center' },  // Date
+            2: { cellWidth: 8, halign: 'center' },   // Type
+            3: { cellWidth: 11, halign: 'center' },  // Broker
+            4: { cellWidth: 8, halign: 'center' },   // From
+            5: { cellWidth: 9, halign: 'center' },   // To
+            6: { cellWidth: 10, halign: 'center' },  // Variety
+            7: { cellWidth: 6, halign: 'center' },   // Bags
+            8: { cellWidth: 6, halign: 'center' },   // M%
+            9: { cellWidth: 6, halign: 'center' },   // Cut
+            10: { cellWidth: 8, halign: 'center' },  // WB
+            11: { cellWidth: 10, halign: 'center' }, // Gross
+            12: { cellWidth: 8, halign: 'center' },  // Tare
+            13: { cellWidth: 10, halign: 'center' }, // Net
+            14: { cellWidth: 10, halign: 'center' }, // Lorry
+            15: { cellWidth: 25, halign: 'center' }, // Amount - FIXED big
+            16: { cellWidth: 18, halign: 'center' }, // Total - FIXED big
+            17: { cellWidth: 12, halign: 'center' }  // Rate - FIXED big
         },
         margin: { left: 5, right: 5 },
-        tableWidth: 'auto', // Let table auto-size
+        tableWidth: 'wrap', // Wrap to fit page
         didDrawCell: (cellData: any) => {
             // Color code rows based on movement type
             if (records && cellData.section === 'body') {
