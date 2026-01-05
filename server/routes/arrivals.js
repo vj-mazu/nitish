@@ -1014,24 +1014,43 @@ router.get('/opening-balance', auth, async (req, res) => {
     `;
 
     // PRODUCTION STOCK: Calculate bags in outturns
-    // For-Production Purchase (+), Production-Shifting (+)
-    // Rice Production (-) - needs to be calculated separately
+    // Inflow: For-Production Purchase (+), Production-Shifting (+)
+    // Outflow: Rice Production paddyBagsDeducted (-)
     const productionStockQuery = `
+      WITH paddy_inflow AS (
+        SELECT 
+          variety,
+          COALESCE(o.code, 'OUT' || a."outturnId") as outturn,
+          COALESCE(SUM(bags), 0) as bags_in
+        FROM arrivals a
+        LEFT JOIN outturns o ON a."outturnId" = o.id
+        WHERE a.date < $1
+          AND a.status = 'approved'
+          AND a."adminApprovedBy" IS NOT NULL
+          AND (
+            (a."movementType" = 'purchase' AND a."outturnId" IS NOT NULL)
+            OR a."movementType" = 'production-shifting'
+          )
+        GROUP BY variety, o.code, a."outturnId"
+      ),
+      rice_outflow AS (
+        SELECT 
+          o."allottedVariety" as variety,
+          o.code as outturn,
+          COALESCE(SUM(rp."paddyBagsDeducted"), 0) as bags_out
+        FROM rice_productions rp
+        LEFT JOIN outturns o ON rp."outturnId" = o.id
+        WHERE rp.date < $1
+          AND rp.status = 'approved'
+        GROUP BY o."allottedVariety", o.code
+      )
       SELECT 
-        variety,
-        COALESCE(o.code, 'OUT' || a."outturnId") as outturn,
-        COALESCE(SUM(bags), 0) as bags
-      FROM arrivals a
-      LEFT JOIN outturns o ON a."outturnId" = o.id
-      WHERE a.date < $1
-        AND a.status = 'approved'
-        AND a."adminApprovedBy" IS NOT NULL
-        AND (
-          (a."movementType" = 'purchase' AND a."outturnId" IS NOT NULL)
-          OR a."movementType" = 'production-shifting'
-        )
-      GROUP BY variety, o.code, a."outturnId"
-      HAVING COALESCE(SUM(bags), 0) > 0
+        COALESCE(pi.variety, ro.variety) as variety,
+        COALESCE(pi.outturn, ro.outturn) as outturn,
+        COALESCE(pi.bags_in, 0) - COALESCE(ro.bags_out, 0) as bags
+      FROM paddy_inflow pi
+      FULL OUTER JOIN rice_outflow ro ON pi.outturn = ro.outturn
+      WHERE COALESCE(pi.bags_in, 0) - COALESCE(ro.bags_out, 0) > 0
     `;
 
     // Execute both queries
