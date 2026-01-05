@@ -1089,18 +1089,30 @@ const Records: React.FC = () => {
   }, [selectedOutturnId]);
 
   // Fetch historical opening balance when stock tab is active and date filter is applied
-  // This is critical for accurate opening stock when viewing a filtered date range
+  // This is critical for accurate opening stock when viewing a filtered date range OR month
   useEffect(() => {
     const fetchOpeningBalance = async () => {
-      // Only fetch for stock tab when we have a date filter
-      if (activeTab !== 'stock' || !dateFrom) {
+      // Only fetch for stock tab when we have a date filter OR month filter
+      if (activeTab !== 'stock' || (!dateFrom && !selectedMonth)) {
         setHistoricalOpeningBalance(null);
         return;
       }
 
       try {
-        // Convert DD-MM-YYYY to YYYY-MM-DD for API
-        const beforeDate = convertDateFormat(dateFrom);
+        // Calculate the beforeDate based on which filter is active
+        let beforeDate: string;
+
+        if (dateFrom) {
+          // Date range filter: use the start date
+          beforeDate = convertDateFormat(dateFrom);
+        } else if (selectedMonth) {
+          // Month filter: use the first day of the selected month
+          // This ensures we get closing stock from the previous month
+          beforeDate = `${selectedMonth}-01`;
+        } else {
+          return;
+        }
+
         if (!beforeDate) return;
 
         console.log(`📊 Fetching opening balance before ${beforeDate}...`);
@@ -1128,7 +1140,7 @@ const Records: React.FC = () => {
     };
 
     fetchOpeningBalance();
-  }, [activeTab, dateFrom]);
+  }, [activeTab, dateFrom, selectedMonth]);
 
 
   // Helper function to calculate paddy bags deducted from rice quintals
