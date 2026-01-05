@@ -1637,18 +1637,24 @@ const Records: React.FC = () => {
       // Handle both success patterns (cast to any to avoid union type issues)
       const data = response.data as any;
       if (data.success || data.message || data.production) {
-        toast.success('Rice movement updated successfully');
         setEditingRiceMovement(null);
 
-        // COMPREHENSIVE REFRESH: Refresh ALL data sources to ensure perfect sync
-        // This ensures edits (date, type, bags changes) reflect properly across all tabs
-        fetchRiceStock();           // Refresh Rice Stock tab
-        fetchProductionRecords();   // Refresh Production Shifting records
-        fetchOutturns();            // Refresh outturns list for Outturn Report tab
-        fetchByProducts();          // Refresh By-Products records
-        fetchRecords();             // Refresh main records (affects all tabs)
+        // COMPREHENSIVE REFRESH: Await ALL fetch calls to ensure immediate UI update
+        // Using Promise.all for parallel fetching with guaranteed completion
+        try {
+          await Promise.all([
+            fetchRiceStock(),           // Refresh Rice Stock tab
+            fetchProductionRecords(),   // Refresh Production Shifting records
+            fetchOutturns(),            // Refresh outturns list for Outturn Report tab
+            fetchByProducts(),          // Refresh By-Products records
+            fetchRecords()              // Refresh main records (affects all tabs)
+          ]);
 
-        // Note: Available bags will auto-refresh via useEffect when productionRecords changes
+          toast.success('Rice movement updated successfully - All data refreshed!');
+        } catch (refreshError) {
+          console.error('Error refreshing data:', refreshError);
+          toast.success('Rice movement updated - Please refresh if data not showing');
+        }
       } else {
         toast.error(data.error || 'Failed to update movement');
       }
