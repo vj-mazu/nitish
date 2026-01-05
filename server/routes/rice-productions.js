@@ -30,10 +30,10 @@ const calculatePaddyBagsDeducted = (quintals, productType) => {
 router.get('/', auth, async (req, res) => {
   const startTime = Date.now();
   try {
-    const { dateFrom, dateTo, outturnId, status, limit = 100, page = 1 } = req.query;
+    const { month, dateFrom, dateTo, outturnId, status, limit = 100, page = 1 } = req.query;
 
     // Create cache key
-    const cacheKey = `rice-productions:${page}:${limit}:${outturnId || ''}:${status || ''}:${dateFrom || ''}:${dateTo || ''}`;
+    const cacheKey = `rice-productions:${page}:${limit}:${outturnId || ''}:${status || ''}:${dateFrom || ''}:${dateTo || ''}:${month || ''}`;
 
     // Try cache first
     const cached = await require('../services/cacheService').get(cacheKey);
@@ -44,10 +44,19 @@ router.get('/', auth, async (req, res) => {
 
     const where = {};
 
+    // Date range filters take priority over Month filter
     if (dateFrom || dateTo) {
       where.date = {};
       if (dateFrom) where.date[Op.gte] = dateFrom;
       if (dateTo) where.date[Op.lte] = dateTo;
+    } else if (month) {
+      const [year, monthNum] = month.split('-');
+      const startDate = `${year}-${monthNum}-01`;
+      const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0];
+      where.date = {
+        [Op.gte]: startDate,
+        [Op.lte]: endDate
+      };
     }
 
     if (outturnId) where.outturnId = outturnId;
@@ -544,12 +553,12 @@ router.put('/:id', auth, async (req, res) => {
     if (production.createdBy !== req.user.userId &&
       req.user.role !== 'manager' &&
       req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Not authorized to update this entry' });
+      return res.status(403).json({ error: 'Not authorized to update this production entry' });
     }
 
-    // Cannot update approved entries
-    if (production.status === 'approved') {
-      return res.status(400).json({ error: 'Cannot update approved entries' });
+    // Status check - Admins can bypass the 'approved' block
+    if (production.status === 'approved' && req.user.role !== 'admin') {
+      return res.status(400).json({ error: 'Approved production entries cannot be updated by non-admin users' });
     }
 
     const {

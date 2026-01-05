@@ -35,18 +35,18 @@ router.get('/movements', auth, async (req, res) => {
         // Build where clause
         const where = {};
 
-        // Date filtering
-        if (year && month) {
+        // Date range filters take priority over Month/Year filter
+        if (dateFrom || dateTo) {
+            where.date = {};
+            if (dateFrom) where.date[Op.gte] = dateFrom;
+            if (dateTo) where.date[Op.lte] = dateTo;
+        } else if (year && month) {
             const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
             const endDate = new Date(parseInt(year), parseInt(month), 0).toISOString().split('T')[0];
             where.date = {
                 [Op.gte]: startDate,
                 [Op.lte]: endDate
             };
-        } else if (dateFrom || dateTo) {
-            where.date = {};
-            if (dateFrom) where.date[Op.gte] = dateFrom;
-            if (dateTo) where.date[Op.lte] = dateTo;
         }
 
         // Movement type filtering
@@ -681,9 +681,9 @@ router.put('/movements/:id', auth, async (req, res) => {
             status
         } = req.body;
 
-        // Check if movement exists
+        // Check if movement exists and get its status
         const existing = await sequelize.query(`
-            SELECT id FROM rice_stock_movements WHERE id = :id
+            SELECT id, status FROM rice_stock_movements WHERE id = :id
         `, {
             replacements: { id },
             type: sequelize.QueryTypes.SELECT
@@ -693,6 +693,16 @@ router.put('/movements/:id', auth, async (req, res) => {
             return res.status(404).json({
                 success: false,
                 error: 'Rice stock movement not found'
+            });
+        }
+
+        const currentStatus = existing[0].status;
+
+        // Status check - Admins can bypass the 'approved' block
+        if (currentStatus === 'approved' && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                error: 'Approved rice stock movements cannot be updated by non-admin users'
             });
         }
 

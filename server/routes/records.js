@@ -46,8 +46,12 @@ router.get('/arrivals', auth, async (req, res) => {
       ];
     }
 
-    // Month-wise filtering
-    if (month) {
+    // Date Range filtering takes priority over Month-wise filtering
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date[Op.gte] = dateFrom;
+      if (dateTo) where.date[Op.lte] = dateTo;
+    } else if (month) {
       const [year, monthNum] = month.split('-');
       const startDate = `${year}-${monthNum}-01`;
       const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0];
@@ -55,10 +59,6 @@ router.get('/arrivals', auth, async (req, res) => {
         [Op.gte]: startDate,
         [Op.lte]: endDate
       };
-    } else if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date[Op.gte] = dateFrom;
-      if (dateTo) where.date[Op.lte] = dateTo;
     } else if (!outturnId) {
       // CLOUD FIX: If no date filter provided AND no outturnId, default to last 30 days to prevent timeout
       // When outturnId is specified, we want ALL records for that outturn regardless of date
@@ -161,8 +161,12 @@ router.get('/purchase', auth, async (req, res) => {
       status: 'approved'
     };
 
-    // Month-wise filtering
-    if (month) {
+    // Date Range filtering takes priority over Month-wise filtering
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date[Op.gte] = dateFrom;
+      if (dateTo) where.date[Op.lte] = dateTo;
+    } else if (month) {
       const [year, monthNum] = month.split('-');
       const startDate = `${year}-${monthNum}-01`;
       const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0];
@@ -170,10 +174,6 @@ router.get('/purchase', auth, async (req, res) => {
         [Op.gte]: startDate,
         [Op.lte]: endDate
       };
-    } else if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date[Op.gte] = dateFrom;
-      if (dateTo) where.date[Op.lte] = dateTo;
     }
 
     // Pagination setup
@@ -268,8 +268,12 @@ router.get('/shifting', auth, async (req, res) => {
       status: 'approved'
     };
 
-    // Month-wise filtering
-    if (month) {
+    // Date Range filtering takes priority over Month-wise filtering
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date[Op.gte] = dateFrom;
+      if (dateTo) where.date[Op.lte] = dateTo;
+    } else if (month) {
       const [year, monthNum] = month.split('-');
       const startDate = `${year}-${monthNum}-01`;
       const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0];
@@ -277,10 +281,6 @@ router.get('/shifting', auth, async (req, res) => {
         [Op.gte]: startDate,
         [Op.lte]: endDate
       };
-    } else if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date[Op.gte] = dateFrom;
-      if (dateTo) where.date[Op.lte] = dateTo;
     }
 
     // Pagination setup
@@ -375,8 +375,12 @@ router.get('/stock', auth, async (req, res) => {
       movementType: { [Op.ne]: 'loose' } // Exclude loose (loss) entries from stock
     };
 
-    // Month-wise filtering
-    if (month) {
+    // Date Range filtering takes priority over Month-wise filtering
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date[Op.gte] = dateFrom;
+      if (dateTo) where.date[Op.lte] = dateTo;
+    } else if (month) {
       const [year, monthNum] = month.split('-');
       const startDate = `${year}-${monthNum}-01`;
       const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0];
@@ -384,10 +388,6 @@ router.get('/stock', auth, async (req, res) => {
         [Op.gte]: startDate,
         [Op.lte]: endDate
       };
-    } else if (dateFrom || dateTo) {
-      where.date = {};
-      if (dateFrom) where.date[Op.gte] = dateFrom;
-      if (dateTo) where.date[Op.lte] = dateTo;
     }
     // If no date filters provided, show all data (no default filter)
 

@@ -842,6 +842,8 @@ const Records: React.FC = () => {
   // Date-wise PDF export state
   const [singleDatePdf, setSingleDatePdf] = useState<string>('');
 
+  // Rice Movement Edit State - for editing rice stock movement entries
+  const [editingRiceMovement, setEditingRiceMovement] = useState<any>(null);
 
   // Get business date (if before 6 AM, use previous day)
   const getBusinessDate = () => {
@@ -1309,8 +1311,11 @@ const Records: React.FC = () => {
 
       // Special handling for paddy stock - month-wise pagination
       if (activeTab === 'stock') {
-        // For paddy stock, use month-wise pagination
-        if (selectedMonth) {
+        // Priority: date range filters > month filter
+        if (dateFrom || dateTo) {
+          if (dateFrom) params.dateFrom = convertDateFormat(dateFrom);
+          if (dateTo) params.dateTo = convertDateFormat(dateTo);
+        } else if (selectedMonth) {
           params.month = selectedMonth;
         } else {
           // If no month selected, show current month
@@ -1325,14 +1330,16 @@ const Records: React.FC = () => {
         params.page = page;
         params.limit = 250; // Always load 250 records per page
 
-        // Priority: month filter > date range filters > show all records
-        if (selectedMonth) {
-          params.month = selectedMonth;
-        } else if (showAllRecords || dateFrom || dateTo) {
-          // Show all records with pagination OR date range with pagination
+        // Priority: date range filters > month filter > show all records
+        if (dateFrom || dateTo) {
+          // Date range with pagination
           if (dateFrom) params.dateFrom = convertDateFormat(dateFrom);
           if (dateTo) params.dateTo = convertDateFormat(dateTo);
-          // Don't set any date filters if showAllRecords is true and no manual dates
+        } else if (selectedMonth) {
+          params.month = selectedMonth;
+        } else if (showAllRecords) {
+          // Show all records with pagination
+          // Don't set any date filters
         } else {
           // Business Date logic: Default to today's records only
           const businessDate = getBusinessDate();
@@ -1584,7 +1591,58 @@ const Records: React.FC = () => {
     }
   };
 
+  // Handler for updating rice stock movement entries
+  const handleUpdateRiceMovement = async (updatedData: any) => {
+    try {
+      if (!editingRiceMovement?.id) {
+        toast.error('No movement selected for editing');
+        return;
+      }
+
+      // Determine which API to call based on movement type
+      const movementType = editingRiceMovement.movementType?.toLowerCase();
+      const isStockMovement = String(editingRiceMovement.originalId || editingRiceMovement.id).includes('movement-') ||
+        ['purchase', 'sale', 'palti'].includes(movementType);
+
+      let response;
+      if (isStockMovement) {
+        // Purchase, Sale, Palti - use rice-stock-management
+        response = await axios.put<{ success: boolean; error?: string; message?: string }>(`/rice-stock-management/movements/${editingRiceMovement.id}`, {
+          date: updatedData.date,
+          productType: updatedData.productType || updatedData.product_type,
+          bags: updatedData.bags,
+          packagingId: updatedData.packagingId || updatedData.packaging_id
+        });
+      } else {
+        // Production entries - use rice-productions
+        response = await axios.put<{ message?: string; production?: any; error?: string }>(`/rice-productions/${editingRiceMovement.id}`, {
+          date: updatedData.date,
+          productType: updatedData.productType || updatedData.product_type,
+          bags: updatedData.bags,
+          packagingId: updatedData.packagingId || updatedData.packaging_id
+        });
+      }
+
+      // Handle both success patterns (cast to any to avoid union type issues)
+      const data = response.data as any;
+      if (data.success || data.message || data.production) {
+        toast.success('Rice movement updated successfully');
+        setEditingRiceMovement(null);
+        // Refresh data from both sources
+        fetchRiceStock();
+        fetchProductionRecords();
+      } else {
+        toast.error(data.error || 'Failed to update movement');
+      }
+    } catch (error: any) {
+      console.error('Error updating rice movement:', error);
+      toast.error(error.response?.data?.error || 'Failed to update rice movement');
+    }
+  };
+
+
   const fetchOutturns = async () => {
+
     try {
       const response = await axios.get<any[]>('/outturns');
       setOutturns(response.data);
@@ -1890,8 +1948,11 @@ const Records: React.FC = () => {
           page: riceStockPage
         };
 
-        // Only use month filter (date range filters removed)
-        if (selectedMonth) {
+        // Priority: Date Range filters > Month filter
+        if (dateFrom || dateTo) {
+          if (dateFrom) productionsParams.dateFrom = convertDateFormat(dateFrom);
+          if (dateTo) productionsParams.dateTo = convertDateFormat(dateTo);
+        } else if (selectedMonth) {
           productionsParams.month = selectedMonth;
         }
 
@@ -1920,8 +1981,11 @@ const Records: React.FC = () => {
             _t: Date.now() // Cache buster
           };
 
-          // Only use month/year filter (date range filters removed)
-          if (selectedMonth) {
+          // Priority: Date Range filters > Month filter
+          if (dateFrom || dateTo) {
+            if (dateFrom) movementsParams.dateFrom = convertDateFormat(dateFrom);
+            if (dateTo) movementsParams.dateTo = convertDateFormat(dateTo);
+          } else if (selectedMonth) {
             const [year, month] = selectedMonth.split('-');
             movementsParams.year = year;
             movementsParams.month = parseInt(month);
@@ -2442,8 +2506,8 @@ const Records: React.FC = () => {
             </FormGroup>
           )}
 
-          {/* Date Range - Only show for non-rice tabs (rice tabs use month filter only) */}
-          {activeTab !== 'rice-stock' && activeTab !== 'rice-outturn-report' && (
+          {/* Date Range - enabled for all tabs as requested */}
+          {(activeTab === 'arrivals' || activeTab === 'purchase' || activeTab === 'shifting' || activeTab === 'stock' || activeTab === 'rice-stock' || activeTab === 'rice-outturn-report') && (
             <>
               <FormGroup>
                 <Label>Date From</Label>
@@ -3136,6 +3200,35 @@ const Records: React.FC = () => {
                                 }}
                               >
                                 Approve
+                              </button>
+                            )}
+
+                            {/* Edit Button - show if pending OR if user is admin */}
+                            {(item.status === 'pending' || user?.role === 'admin') && (
+                              <button
+                                onClick={() => {
+                                  // Set the item for editing
+                                  const movementId = String(item.id).replace('movement-', '');
+                                  setEditingRiceMovement({
+                                    ...item,
+                                    id: movementId // Store clean ID for API call
+                                  });
+                                }}
+                                style={{
+                                  padding: '4px 12px',
+                                  backgroundColor: '#3b82f6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontSize: '0.85rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title={item.status === 'approved' ? "Admin Edit: Approved Record" : "Edit this entry"}
+                              >
+                                ✏️ Edit
                               </button>
                             )}
 
@@ -4221,13 +4314,16 @@ const Records: React.FC = () => {
                                                 </div>
                                               )}
                                             </div>
-                                            <div style={{ textAlign: 'center' }}>
-                                              <div>{prod.locationCode || prod.location || ''}</div>
-                                              {prod.billNumber && (
-                                                <div style={{ fontSize: '8pt', color: '#666' }}>
-                                                  {prod.billNumber}
-                                                </div>
-                                              )}
+                                            <div style={{ textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                              <div>
+                                                <div>{prod.locationCode || prod.location || ''}</div>
+                                                {prod.billNumber && (
+                                                  <div style={{ fontSize: '8pt', color: '#666' }}>
+                                                    {prod.billNumber}
+                                                  </div>
+                                                )}
+                                              </div>
+                                              {/* Edit button removed from here - functionality consolidated in Rice Stock Movement tab */}
                                             </div>
                                           </div>
                                         );
@@ -8089,6 +8185,122 @@ const Records: React.FC = () => {
           fetchPendingMovements();
         }}
       />
+
+      {/* Rice Movement Edit Modal */}
+      {editingRiceMovement && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            padding: '24px',
+            borderRadius: '12px',
+            minWidth: '400px',
+            maxWidth: '500px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+          }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#1f2937' }}>
+              ✏️ Edit Rice Movement Entry
+            </h3>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Date</label>
+              <input
+                type="date"
+                defaultValue={editingRiceMovement.date?.split('T')[0] || ''}
+                onChange={(e) => setEditingRiceMovement({ ...editingRiceMovement, date: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Product Type</label>
+              <select
+                value={editingRiceMovement.product_type || editingRiceMovement.productType || ''}
+                onChange={(e) => setEditingRiceMovement({ ...editingRiceMovement, productType: e.target.value, product_type: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  backgroundColor: 'white'
+                }}
+              >
+                <option value="">Select Product Type</option>
+                <option value="Rice">Rice</option>
+                <option value="Bran">Bran</option>
+                <option value="Farm Bran">Farm Bran</option>
+                <option value="Faram">Faram</option>
+                <option value="Zero Broken">Zero Broken</option>
+                <option value="Sizer Broken">Sizer Broken</option>
+                <option value="Rejection Rice">Rejection Rice</option>
+                <option value="RJ Rice 1">RJ Rice 1</option>
+                <option value="RJ Rice 2">RJ Rice 2</option>
+                <option value="RJ Broken">RJ Broken</option>
+                <option value="Unpolished">Unpolished</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: '600' }}>Bags</label>
+              <input
+                type="number"
+                value={editingRiceMovement.bags || 0}
+                onChange={(e) => setEditingRiceMovement({ ...editingRiceMovement, bags: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setEditingRiceMovement(null)}
+                style={{
+                  padding: '10px 20px',
+                  background: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleUpdateRiceMovement(editingRiceMovement)}
+                style={{
+                  padding: '10px 20px',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                💾 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </Container >
   );
