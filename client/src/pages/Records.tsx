@@ -1,3 +1,4 @@
+// Final verified production-ready Records.tsx
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
@@ -916,9 +917,7 @@ const Records: React.FC = () => {
   // Rice Stock state
   const [riceStockData, setRiceStockData] = useState<any[]>([]);
 
-  // Rice Stock filter state - Using month-wise filtering only (no date range)
-  const [riceStockDateFrom, setRiceStockDateFrom] = useState<string>(''); // Disabled - using month filter
-  const [riceStockDateTo, setRiceStockDateTo] = useState<string>(''); // Disabled - using month filter
+  // Rice Stock filter state - Unified with main dateFrom/dateTo
   const [riceStockProductType, setRiceStockProductType] = useState<string>('');
   const [riceStockLocationCode, setRiceStockLocationCode] = useState<string>('');
 
@@ -1928,7 +1927,7 @@ const Records: React.FC = () => {
     try {
       console.log('🔄 Fetching rice stock data...');
       console.log('🔍 Active tab:', activeTab);
-      console.log('🔍 Filters:', { riceStockDateFrom, riceStockDateTo, riceStockProductType, riceStockLocationCode });
+      console.log('🔍 Filters:', { dateFrom, dateTo, riceStockProductType, riceStockLocationCode });
 
       // For both Rice Stock Movement tabs: fetch ALL movements (Production + Purchase + Sale)
       if (activeTab === 'rice-outturn-report' || activeTab === 'rice-stock') {
@@ -2332,16 +2331,16 @@ const Records: React.FC = () => {
       } else if (activeTab === 'rice-outturn-report') {
         endpoint = 'export/pdf/rice-stock-movements';
         filename = 'rice_stock_movements';
-        // Use rice stock date filters
-        params.dateFrom = riceStockDateFrom;
-        params.dateTo = riceStockDateTo;
+        // Use date range filters
+        if (dateFrom) params.dateFrom = convertDateFormat(dateFrom);
+        if (dateTo) params.dateTo = convertDateFormat(dateTo);
         if (riceStockProductType) params.productType = riceStockProductType;
       } else if (activeTab === 'rice-stock') {
         endpoint = 'export/pdf/rice-stock';
         filename = 'rice_stock';
-        // Use rice stock date filters
-        params.dateFrom = riceStockDateFrom;
-        params.dateTo = riceStockDateTo;
+        // Use date range filters
+        if (dateFrom) params.dateFrom = convertDateFormat(dateFrom);
+        if (dateTo) params.dateTo = convertDateFormat(dateTo);
         if (riceStockProductType) params.productType = riceStockProductType;
         if (riceStockLocationCode) params.locationCode = riceStockLocationCode;
       }
@@ -2608,8 +2607,8 @@ const Records: React.FC = () => {
 
             <Button className="secondary" onClick={() => {
               if (activeTab === 'rice-stock' || activeTab === 'rice-outturn-report') {
-                setRiceStockDateFrom('');
-                setRiceStockDateTo('');
+                setDateFrom('');
+                setDateTo('');
                 setRiceStockProductType('');
                 setRiceStockLocationCode('');
               } else {
@@ -2667,13 +2666,13 @@ const Records: React.FC = () => {
                   } else if (activeTab === 'rice-outturn-report') {
                     generateRiceMovementsPDF(riceStockData, {
                       title: 'Rice Stock Movement Report',
-                      dateRange: `${riceStockDateFrom || 'Start'} to ${riceStockDateTo || 'End'}`,
+                      dateRange: `${dateFrom || 'Start'} to ${dateTo || 'End'}`,
                       filterType: 'all'
                     });
                   } else if (activeTab === 'rice-stock') {
                     generateRiceStockPDF(riceStockData, {
                       title: 'Rice Stock Report',
-                      dateRange: `${riceStockDateFrom || 'Start'} to ${riceStockDateTo || 'End'}`,
+                      dateRange: `${dateFrom || 'Start'} to ${dateTo || 'End'}`,
                       filterType: 'all'
                     });
                   } else if (activeTab === 'stock') {
@@ -2737,14 +2736,14 @@ const Records: React.FC = () => {
                     generateRiceMovementsPDF(riceStockData, {
                       title: 'Rice Stock Movement Report',
                       subtitle: `Filtered View`,
-                      dateRange: `${riceStockDateFrom || 'Start'} to ${riceStockDateTo || 'End'}`,
+                      dateRange: `${dateFrom || 'Start'} to ${dateTo || 'End'}`,
                       filterType: filterType as 'day' | 'week' | 'month'
                     });
                   } else if (activeTab === 'rice-stock') {
                     generateRiceStockPDF(riceStockData, {
                       title: 'Rice Stock Report',
                       subtitle: `Filtered View`,
-                      dateRange: `${riceStockDateFrom || 'Start'} to ${riceStockDateTo || 'End'}`,
+                      dateRange: `${dateFrom || 'Start'} to ${dateTo || 'End'}`,
                       filterType: filterType as 'day' | 'week' | 'month'
                     });
                   } else if (activeTab === 'stock') {
@@ -2884,18 +2883,18 @@ const Records: React.FC = () => {
       </FilterSection>
 
 
-      {/* Current Month View Indicator */}
-      {selectedMonth && activeTab !== 'rice-outturn-report' && activeTab !== 'rice-stock' && (
+      {/* Month-wise/Date Range Header Info */}
+      {selectedMonth && !dateFrom && !dateTo && (
         <div style={{
-          background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)',
-          padding: '1rem 1.5rem',
+          backgroundColor: '#eff6ff',
+          border: '1px solid #3b82f6',
           borderRadius: '12px',
+          padding: '1.25rem',
           marginBottom: '1.5rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)',
-          border: '2px solid #3b82f6'
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
         }}>
           <div>
             <div style={{ color: '#1e40af', fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.25rem' }}>
@@ -2912,6 +2911,40 @@ const Records: React.FC = () => {
             aria-label="Clear month filter and return to date range view"
           >
             ✕ Clear
+          </Button>
+        </div>
+      )}
+
+      {/* Date Range info - only show if date filters are active */}
+      {(dateFrom || dateTo) && (
+        <div style={{
+          backgroundColor: '#f0fdf4',
+          border: '1px solid #10b981',
+          borderRadius: '12px',
+          padding: '1.25rem',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+        }}>
+          <div>
+            <div style={{ color: '#065f46', fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.25rem' }}>
+              📅 Date Range View: {dateFrom || 'Start'} to {dateTo || 'End'}
+            </div>
+            <div style={{ color: '#064e3b', fontSize: '0.9rem' }}>
+              Showing filtered records for selected dates
+            </div>
+          </div>
+          <Button
+            className="secondary"
+            onClick={() => {
+              setDateFrom('');
+              setDateTo('');
+            }}
+            style={{ padding: '0.75rem 1.5rem', fontSize: '0.95rem' }}
+          >
+            ✕ Reset Dates
           </Button>
         </div>
       )}
@@ -3133,18 +3166,24 @@ const Records: React.FC = () => {
                         <td>{item.to || item.locationCode || '-'}</td>
                         <td>{item.lorryNumber || item.billNumber || '-'}</td>
                         <td>
-                          <span style={{
+                          <div style={{
                             padding: '4px 8px',
                             borderRadius: '4px',
                             fontSize: '0.85rem',
                             fontWeight: '500',
                             backgroundColor: item.status === 'approved' ? '#dcfce7' : '#fef3c7',
-                            color: item.status === 'approved' ? '#16a34a' : '#ca8a04'
+                            color: item.status === 'approved' ? '#16a34a' : '#ca8a04',
+                            display: 'inline-block',
+                            marginBottom: '4px'
                           }}>
                             {item.status?.toUpperCase() || 'PENDING'}
-                          </span>
+                          </div>
+                          {item.creator?.username && (
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              By: {item.creator.username}
+                            </div>
+                          )}
                         </td>
-                        <td>{item.creator?.username}</td>
                         <td>
                           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                             {/* Approve Button for Pending Items */}
@@ -3204,7 +3243,7 @@ const Records: React.FC = () => {
                             )}
 
                             {/* Edit Button - show if pending OR if user is admin */}
-                            {(item.status === 'pending' || user?.role === 'admin') && (
+                            {(item.status === 'pending' || user?.role === 'admin' || user?.role === 'manager') && (
                               <button
                                 onClick={() => {
                                   // Set the item for editing
