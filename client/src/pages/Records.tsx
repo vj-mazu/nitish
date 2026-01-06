@@ -1108,6 +1108,7 @@ const Records: React.FC = () => {
     // Validate date format: must be DD-MM-YYYY (10 characters)
     if (dateFrom.length !== 10 || dateFrom.split('-').length !== 3) {
       console.log(`⏳ Waiting for complete date format (current: ${dateFrom})`);
+      setHistoricalOpeningBalance(null); // Clear stale data while typing
       return; // Don't fetch until date is complete
     }
 
@@ -1129,13 +1130,33 @@ const Records: React.FC = () => {
       });
 
       if (response.data) {
+        // STANDARDIZE KEYS: Use | instead of - to avoid hyphen bugs
+        const standardizedWarehouse: any = {};
+        const standardizedProduction: any = {};
+
+        if (response.data.warehouseBalance) {
+          Object.values(response.data.warehouseBalance).forEach((item: any) => {
+            const key = `${item.variety}|${item.location}`;
+            standardizedWarehouse[key] = { ...item };
+          });
+        }
+
+        if (response.data.productionBalance) {
+          Object.values(response.data.productionBalance).forEach((item: any) => {
+            // Include outturn code as the unique identifier part
+            const key = `${item.variety}|${item.outturn}`;
+            standardizedProduction[key] = { ...item };
+          });
+        }
+
         setHistoricalOpeningBalance({
-          warehouseBalance: response.data.warehouseBalance || {},
-          productionBalance: response.data.productionBalance || {}
+          warehouseBalance: standardizedWarehouse,
+          productionBalance: standardizedProduction
         });
-        console.log('✅ Opening balance fetched:', {
-          warehouseEntries: Object.keys(response.data.warehouseBalance || {}).length,
-          productionEntries: Object.keys(response.data.productionBalance || {}).length
+
+        console.log('✅ Opening balance fetched and standardized:', {
+          warehouseEntries: Object.keys(standardizedWarehouse).length,
+          productionEntries: Object.keys(standardizedProduction).length
         });
       }
     } catch (error) {
@@ -2243,6 +2264,7 @@ const Records: React.FC = () => {
       toast.success(`Record ${status} successfully`);
       fetchRecords();
       fetchOpeningBalance(); // Refresh stock totals
+      fetchAllRiceProductions(); // Refresh production deductions
     } catch (error: any) {
       toast.error(error.response?.data?.error || `Failed to ${status} record`);
     }
@@ -2254,6 +2276,7 @@ const Records: React.FC = () => {
       toast.success('Record approved by admin - added to paddy stock');
       fetchRecords();
       fetchOpeningBalance(); // Refresh stock totals
+      fetchAllRiceProductions(); // Refresh production deductions
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to approve record');
     }
@@ -2268,6 +2291,8 @@ const Records: React.FC = () => {
       await axios.delete(`/arrivals/${id}`);
       toast.success('Arrival deleted successfully');
       fetchRecords();
+      fetchOpeningBalance();
+      fetchAllRiceProductions();
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to delete arrival');
     }
@@ -2301,6 +2326,8 @@ const Records: React.FC = () => {
       toast.success(`Movement ${status} successfully`);
       fetchPendingMovements();
       fetchRiceStock(); // Refresh main data
+      fetchOpeningBalance(); // Refresh stock totals
+      fetchAllRiceProductions(); // Refresh production deductions
     } catch (error: any) {
       toast.error(error.response?.data?.error || `Failed to ${status} movement`);
     }
@@ -2312,6 +2339,8 @@ const Records: React.FC = () => {
 
   const handleEditSuccess = () => {
     fetchRecords();
+    fetchOpeningBalance();
+    fetchAllRiceProductions();
     setEditingRecord(null);
   };
 
@@ -5879,7 +5908,7 @@ const Records: React.FC = () => {
                         if (rec.movementType === 'purchase' && !rec.outturnId) {
                           // Normal Purchase: Add to warehouse destination location
                           const location = `${rec.toKunchinittu?.code || ''} - ${rec.toWarehouse?.name || ''}`;
-                          const key = `${variety}-${location}`;
+                          const key = `${variety}|${location}`;
 
                           if (!openingStockByKey[key]) {
                             openingStockByKey[key] = { bags: 0, variety, location };
@@ -5888,7 +5917,7 @@ const Records: React.FC = () => {
                         } else if (rec.movementType === 'purchase' && rec.outturnId) {
                           // For-production purchase: Add directly to production shifting opening stock (no warehouse)
                           const outturn = rec.outturn?.code || `OUT${rec.outturnId}`;
-                          const prodKey = `${variety}-${outturn}`;
+                          const prodKey = `${variety}|${outturn}`;
 
                           if (!openingProductionShifting[prodKey]) {
                             openingProductionShifting[prodKey] = { bags: 0, variety, outturn, kunchinittu: '' };
@@ -5898,8 +5927,8 @@ const Records: React.FC = () => {
                           // Normal shifting: Subtract from source, add to destination
                           const fromLocation = `${rec.fromKunchinittu?.code || ''} - ${rec.fromWarehouse?.name || ''}`;
                           const toLocation = `${rec.toKunchinittu?.code || ''} - ${rec.toWarehouseShift?.name || ''}`;
-                          const fromKey = `${variety}-${fromLocation}`;
-                          const toKey = `${variety}-${toLocation}`;
+                          const fromKey = `${variety}|${fromLocation}`;
+                          const toKey = `${variety}|${toLocation}`;
 
                           if (!openingStockByKey[fromKey]) {
                             openingStockByKey[fromKey] = { bags: 0, variety, location: fromLocation };
@@ -5912,9 +5941,9 @@ const Records: React.FC = () => {
                         } else if (rec.movementType === 'production-shifting') {
                           // Production-shifting: SUBTRACT from warehouse stock and ADD to production shifting opening stock
                           const fromLocation = `${rec.fromKunchinittu?.code || ''} - ${rec.fromWarehouse?.name || ''}`;
-                          const fromKey = `${variety}-${fromLocation}`;
+                          const fromKey = `${variety}|${fromLocation}`;
                           const outturn = rec.outturn?.code || '';
-                          const prodKey = `${variety}-${outturn}`;
+                          const prodKey = `${variety}|${outturn}`;
 
                           // Subtract from warehouse stock
                           if (!openingStockByKey[fromKey]) {
@@ -5949,7 +5978,7 @@ const Records: React.FC = () => {
                         const variety = outturnArrival.variety || 'Unknown';
                         const outturn = rp.outturn?.code || 'Unknown';
                         // Group by variety and outturn only (not kunchinittu) for opening stock
-                        const prodKey = `${variety}-${outturn}`;
+                        const prodKey = `${variety}|${outturn}`;
 
                         if (openingProductionShifting[prodKey]) {
                           // Use stored paddyBagsDeducted or calculate with new formula
@@ -6060,26 +6089,30 @@ const Records: React.FC = () => {
                         console.warn(`⚠️ Purchase #${rec.id}: Has both outturnId and toKunchinintuId. Treating as For Production (outturn takes priority).`);
                       } else if (!hasOutturn && !hasWarehouse) {
                         console.warn(`⚠️ Purchase #${rec.id}: Missing both outturnId and toKunchinintuId. Treating as Normal Purchase with empty warehouse.`);
-                        // Don't skip - let it be processed as normal purchase with empty warehouse
                       }
 
                       if (!rec.outturnId) {
                         // Normal Purchase: Add to warehouse stock (will be shifted to production later)
                         const location = `${rec.toKunchinittu?.code || ''} - ${rec.toWarehouse?.name || ''}`;
-                        const key = `${variety}-${location}`;
+                        const key = `${variety}|${location}`;
 
                         console.log(`[${date}] Normal Purchase: Adding ${rec.bags} bags of ${variety} to warehouse (${location})`);
                         updateStock(closingStockByKey, key, rec.bags || 0, { variety, location });
                       } else {
-                        // For Production Purchase: Skip warehouse stock, will be added to production stock later
-                        console.log(`[${date}] For Production Purchase: Skipping warehouse stock for ${rec.bags} bags of ${variety} (goes directly to outturn)`);
+                        // For Production Purchase: Skip warehouse stock, will be added to production stock directly
+                        const kunchinittu = rec.fromKunchinittu?.code || 'Direct';
+                        const outturn = rec.outturn?.code || `OUT${rec.outturnId}`;
+                        const key = `${variety}|${outturn}`;
+
+                        console.log(`[${date}] For Production Purchase: Adding ${rec.bags} bags of ${variety} directly to production (${outturn})`);
+                        updateStock(productionShiftingClosing, key, rec.bags || 0, { variety, outturn, kunchinittu });
                       }
                     } else if (rec.movementType === 'shifting') {
                       // Normal shifting: Subtract from source, add to destination
                       const fromLocation = `${rec.fromKunchinittu?.code || ''} - ${rec.fromWarehouse?.name || ''}`;
                       const toLocation = `${rec.toKunchinittu?.code || ''} - ${rec.toWarehouseShift?.name || ''}`;
-                      const fromKey = `${variety}-${fromLocation}`;
-                      const toKey = `${variety}-${toLocation}`;
+                      const fromKey = `${variety}|${fromLocation}`;
+                      const toKey = `${variety}|${toLocation}`;
 
                       // Only proceed with shifting if source has enough stock
                       const bags = rec.bags || 0;
@@ -6092,10 +6125,10 @@ const Records: React.FC = () => {
                     } else if (rec.movementType === 'production-shifting') {
                       // Production-shifting: SUBTRACT from warehouse stock and ADD to production stock
                       const fromLocation = `${rec.fromKunchinittu?.code || ''} - ${rec.fromWarehouse?.name || ''}`;
-                      const fromKey = `${variety}-${fromLocation}`;
+                      const fromKey = `${variety}|${fromLocation}`;
                       const kunchinittu = rec.fromKunchinittu?.code || '';
                       const outturn = rec.outturn?.code || '';
-                      const prodKey = `${variety}-${kunchinittu}-${outturn}`;
+                      const prodKey = `${variety}|${outturn}`;
                       const bags = rec.bags || 0;
 
                       // Subtract from warehouse stock
@@ -6105,15 +6138,6 @@ const Records: React.FC = () => {
                       } else {
                         console.warn(`⚠️ Insufficient warehouse stock in ${fromLocation} for production shifting ${bags} bags of ${variety} to ${outturn}`);
                       }
-                    } else if (rec.movementType === 'purchase' && rec.outturnId) {
-                      // For Production Purchase: Add DIRECTLY to production stock (bypasses warehouse)
-                      // This does NOT affect closingStockByKey (warehouse stock)
-                      const kunchinittu = rec.fromKunchinittu?.code || 'Direct';
-                      const outturn = rec.outturn?.code || `OUT${rec.outturnId}`;
-                      const key = `${variety}-${kunchinittu}-${outturn}`;
-
-                      console.log(`[${date}] For Production Purchase: Adding ${rec.bags} bags of ${variety} directly to production (${outturn})`);
-                      updateStock(productionShiftingClosing, key, rec.bags || 0, { variety, outturn, kunchinittu });
                     }
                   });
 
@@ -6136,10 +6160,10 @@ const Records: React.FC = () => {
                     console.log(`[${date}] Production shifting keys:`, Object.keys(productionShiftingClosing));
 
                     // Try to find matching key in productionShiftingClosing
-                    // The key format is: ${variety}-${kunchinittu}-${outturn}
+                    // The key format is: ${variety}|${outturn}
                     let matchedKey = null;
                     for (const key of Object.keys(productionShiftingClosing)) {
-                      const parts = key.split('-');
+                      const parts = key.split('|');
                       const keyOutturn = parts[parts.length - 1]; // Last part is outturn code
 
                       console.log(`[${date}] Comparing key outturn "${keyOutturn}" with rice outturn "${riceOutturnCode}"`);
@@ -6267,7 +6291,7 @@ const Records: React.FC = () => {
                           const locationParts = item.location.split(' - ');
                           const kunchinittu = locationParts[0] || '';
                           const warehouse = locationParts[1] || '';
-                          const key = `${item.variety}-${kunchinittu}`;
+                          const key = `${item.variety}|${kunchinittu}`;
 
                           if (!kunchinintuStock[key]) {
                             kunchinintuStock[key] = { bags: 0, variety: item.variety, kunchinittu, warehouse };
@@ -6485,7 +6509,7 @@ const Records: React.FC = () => {
                                   const openingStockKeys = new Set(
                                     openingStockItems.map((item: any) => {
                                       const kunchinintuCode = item.location.split(' - ')[0]; // Extract kunchinittu code
-                                      return `${item.variety}-${kunchinintuCode}`;
+                                      return `${item.variety}|${kunchinintuCode}`;
                                     })
                                   );
 
@@ -6541,8 +6565,8 @@ const Records: React.FC = () => {
                                         const toWarehouse = record.toWarehouse?.name || '';
                                         console.log(`✓ Normal Purchase #${record.id}: ${record.variety} (${record.bags} bags) → Warehouse: ${toKunchinittu} - ${toWarehouse} | Broker: ${record.broker}`);
 
-                                        const key = `${record.variety}-${record.broker}-${toKunchinittu}-${record.id}`;
-                                        const highlightKey = `${record.variety}-${toKunchinittu}`;
+                                        const key = `${record.variety}|${record.broker}|${toKunchinittu}|${record.id}`;
+                                        const highlightKey = `${record.variety}|${toKunchinittu}`;
                                         const shouldHighlight = openingStockKeys.has(highlightKey);
 
                                         if (!purchaseGroups[key]) {
@@ -6561,8 +6585,8 @@ const Records: React.FC = () => {
                                       const fromKunchinittu = record.fromKunchinittu?.code || '';
                                       const outturnCode = record.outturn?.code || '';
                                       // Use record ID to keep each entry separate (no grouping on same day)
-                                      const key = `${record.variety}-${fromKunchinittu}-${outturnCode}-${record.id}`;
-                                      const highlightKey = `${record.variety}-${fromKunchinittu}`;
+                                      const key = `${record.variety}|${fromKunchinittu}|${outturnCode}|${record.id}`;
+                                      const highlightKey = `${record.variety}|${fromKunchinittu}`;
                                       const shouldHighlight = openingStockKeys.has(highlightKey);
 
                                       // Format destination with outturn code
@@ -6588,8 +6612,8 @@ const Records: React.FC = () => {
                                       const fromKunchinittu = record.fromKunchinittu?.code || '';
                                       const toKunchinittu = record.toKunchinittu?.code || '';
                                       // Use record ID to keep each entry separate (no grouping on same day)
-                                      const key = `${record.variety}-${fromKunchinittu}-${toKunchinittu}-${record.id}`;
-                                      const highlightKey = `${record.variety}-${fromKunchinittu}`;
+                                      const key = `${record.variety}|${fromKunchinittu}|${toKunchinittu}|${record.id}`;
+                                      const highlightKey = `${record.variety}|${fromKunchinittu}`;
                                       const shouldHighlight = openingStockKeys.has(highlightKey);
 
                                       if (!shiftingGroups[key]) {
@@ -6904,13 +6928,13 @@ const Records: React.FC = () => {
                                               variety = rp.outturn.allottedVariety;
                                             } else if (outturnCode) {
                                               const matchingKey = Object.keys(productionShiftingClosing).find(key => {
-                                                const parts = key.split('-');
+                                                const parts = key.split('|');
                                                 const keyOutturn = parts[parts.length - 1];
                                                 return keyOutturn === outturnCode;
                                               });
 
                                               if (matchingKey) {
-                                                const parts = matchingKey.split('-');
+                                                const parts = matchingKey.split('|');
                                                 variety = parts[0];
                                               } else {
                                                 const outturnArrival = Object.values(records).flat().find((rec: any) =>
