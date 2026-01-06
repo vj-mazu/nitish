@@ -5959,38 +5959,10 @@ const Records: React.FC = () => {
                         }
                       });
                     });
-
-                    // Subtract rice production from opening production shifting stock (for all previous dates)
-                    // CRITICAL: Only count rice productions that aren't already in the historicalOpeningBalance
-                    const allRiceProdsBeforeDate = allRiceProductions.filter((rp: any) => {
-                      if (historicalOpeningBalance && startDateStr) {
-                        return rp.date < date && rp.date >= startDateStr;
-                      }
-                      return rp.date < date;
-                    });
-                    allRiceProdsBeforeDate.forEach((rp: any) => {
-                      const outturnArrival = Object.values(records).flat().find((rec: any) =>
-                        (rec.movementType === 'production-shifting' || (rec.movementType === 'purchase' && rec.outturnId)) &&
-                        rec.outturn?.code === rp.outturn?.code
-                      );
-
-                      if (outturnArrival) {
-                        const variety = outturnArrival.variety || 'Unknown';
-                        const outturn = rp.outturn?.code || 'Unknown';
-                        // Group by variety and outturn only (not kunchinittu) for opening stock
-                        const prodKey = `${variety}|${outturn}`;
-
-                        if (openingProductionShifting[prodKey]) {
-                          // Use stored paddyBagsDeducted or calculate with new formula
-                          const deductedBags = rp.paddyBagsDeducted || calculatePaddyBagsDeducted(rp.quantityQuintals || 0, rp.productType || '');
-                          openingProductionShifting[prodKey].bags -= deductedBags;
-                          // Prevent negative values
-                          if (openingProductionShifting[prodKey].bags < 0) {
-                            openingProductionShifting[prodKey].bags = 0;
-                          }
-                        }
-                      }
-                    });
+                    // NOTE: Rice production deductions are NOT re-applied here.
+                    // They are already reflected in the previous day's closing stock,
+                    // which becomes today's opening stock via the carry-forward logic above.
+                    // Re-applying them here would cause DOUBLE DEDUCTION (the Feb 3rd → Feb 4th bug).
                   } // End of: if (!historicalOpeningBalance || (!dateFrom && !selectedMonth))
 
                   const openingStockItems = Object.values(openingStockByKey);
