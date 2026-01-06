@@ -5959,10 +5959,35 @@ const Records: React.FC = () => {
                         }
                       });
                     });
-                    // NOTE: Rice production deductions are NOT re-applied here.
-                    // They are already reflected in the previous day's closing stock,
-                    // which becomes today's opening stock via the carry-forward logic above.
-                    // Re-applying them here would cause DOUBLE DEDUCTION (the Feb 3rd → Feb 4th bug).
+                    // CRITICAL: Subtract rice productions from previous dates WITHIN the filtered range
+                    // This ensures that when viewing Feb 4th, the opening stock reflects Feb 3rd's rice deductions
+                    datesBeforeCurrent.forEach(prevDate => {
+                      const prevDateRiceProds = allRiceProductions.filter((rp: any) => rp.date === prevDate);
+                      prevDateRiceProds.forEach((rp: any) => {
+                        // Skip 'loading' (dispatch) entries - they don't reduce paddy stock
+                        if (rp.movementType === 'loading') return;
+
+                        const riceOutturnCode = rp.outturn?.code || '';
+                        if (!riceOutturnCode) return;
+
+                        // Find the matching production key
+                        const matchingKey = Object.keys(openingProductionShifting).find(key => {
+                          const parts = key.split('|');
+                          const keyOutturn = parts[parts.length - 1];
+                          return keyOutturn === riceOutturnCode;
+                        });
+
+                        if (matchingKey && openingProductionShifting[matchingKey]) {
+                          const deductedBags = rp.paddyBagsDeducted || calculatePaddyBagsDeducted(rp.quantityQuintals || 0, rp.productType || '');
+                          openingProductionShifting[matchingKey].bags -= deductedBags;
+                          // Prevent negative values
+                          if (openingProductionShifting[matchingKey].bags < 0) {
+                            openingProductionShifting[matchingKey].bags = 0;
+                          }
+                          console.log(`[${date}] Deducted ${deductedBags} bags from ${matchingKey} for rice production on ${prevDate}`);
+                        }
+                      });
+                    });
                   } // End of: if (!historicalOpeningBalance || (!dateFrom && !selectedMonth))
 
                   const openingStockItems = Object.values(openingStockByKey);
