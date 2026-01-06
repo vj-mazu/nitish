@@ -591,10 +591,11 @@ router.put('/:id', auth, async (req, res) => {
 
     // Recalculate quintals and paddy bags if bags or packaging changed
     // CRITICAL: Store original values BEFORE any changes for By-Products sync
-    const oldQuantityQuintals = production.quantityQuintals;
+    const oldOutturnId = production.outturnId;
+    const oldQuantityQuintals = parseFloat(production.quantityQuintals) || 0;
     const oldDate = production.date; // Capture old date for By-Products sync
     const oldProductType = production.productType; // Capture old product type too
-    let quantityQuintals = production.quantityQuintals;
+    let quantityQuintals = oldQuantityQuintals;
     let paddyBagsDeducted = production.paddyBagsDeducted;
     let finalBags = bags !== undefined ? parseFloat(bags) : production.bags;
 
@@ -666,83 +667,86 @@ router.put('/:id', auth, async (req, res) => {
     // This ensures Outturn Report shows correct totals after edit
     try {
       // Normalize dates to YYYY-MM-DD string for proper comparison
+      // TZ-SAFE Version: Extracts local date parts to avoid UTC shift
       const normalizeDate = (d) => {
         if (!d) return null;
-        if (typeof d === 'string') return d.substring(0, 10); // Take just YYYY-MM-DD part
-        if (d instanceof Date) return d.toISOString().substring(0, 10);
-        return String(d).substring(0, 10);
+        if (typeof d === 'string') return d.substring(0, 10);
+        const dateObj = new Date(d);
+        if (isNaN(dateObj.getTime())) return null;
+
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       };
 
       const oldDateStr = normalizeDate(oldDate);
       const newDateStr = normalizeDate(date) || normalizeDate(production.date);
+      const newOutturnId = outturnId || production.outturnId;
       const newProductType = productType || oldProductType;
+
       const dateChanged = oldDateStr !== newDateStr;
+      const outturnChanged = oldOutturnId !== newOutturnId;
+      const productTypeChanged = oldProductType !== newProductType;
       const quantityChanged = Math.abs(quantityQuintals - oldQuantityQuintals) > 0.001;
 
-      console.log(`📊 By-Products sync DEBUG: oldDate="${oldDateStr}", newDate="${newDateStr}"`);
-      console.log(`📊 By-Products sync: dateChanged=${dateChanged}, quantityChanged=${quantityChanged}`);
+      console.log(`📊 BY-PRODUCTS SYNC START (Production ID: ${production.id})`);
+      console.log(`   - Changes detected: date=${dateChanged}, outturn=${outturnChanged}, type=${productTypeChanged}, qty=${quantityChanged}`);
 
-      // Helper function to determine field from product type
       const getFieldFromProductType = (typeStr) => {
+        if (!typeStr) return 'rice';
         const typeLower = typeStr.toLowerCase();
         if (typeLower === 'rj rice 1') return 'rjRice1';
         if (typeLower === 'rj rice 2') return 'rjRice2';
-        if (typeLower.includes('rice') && !typeLower.includes('rejection') && !typeLower.includes('sizer')) return 'rice';
-        if ((typeLower.includes('rejection') && typeLower.includes('rice')) || (typeLower.includes('sizer') && typeLower.includes('broken'))) return 'rejectionRice';
-        if (typeLower.includes('broken') && !typeLower.includes('rejection') && !typeLower.includes('zero') && !typeLower.includes('sizer')) return 'broken';
+        if (typeLower === 'sizer broken') return 'rejectionRice'; // Sizer broken mapped to rejection rice column
+        if (typeLower.includes('rejection') && typeLower.includes('rice')) return 'rejectionRice';
+        if (typeLower.includes('rice')) return 'rice';
         if (typeLower.includes('rejection') && typeLower.includes('broken')) return 'rejectionBroken';
         if (typeLower.includes('zero') && typeLower.includes('broken')) return 'zeroBroken';
+        if (typeLower.includes('broken')) return 'broken';
         if (typeLower.includes('faram')) return 'faram';
         if (typeLower.includes('bran')) return 'bran';
         if (typeLower.includes('unpolished')) return 'unpolished';
-        return 'rice'; // default
+        return 'rice';
       };
 
-      if (dateChanged || quantityChanged) {
-        console.log(`   Old: Date=${oldDateStr}, Qty=${oldQuantityQuintals}, Type=${oldProductType}`);
-        console.log(`   New: Date=${newDateStr}, Qty=${quantityQuintals}, Type=${newProductType}`);
-
+      if (dateChanged || outturnChanged || productTypeChanged || quantityChanged) {
         const oldField = getFieldFromProductType(oldProductType);
         const newField = getFieldFromProductType(newProductType);
 
-        // STEP 1: SUBTRACT old quantity from OLD date's By-Products
-        if (dateChanged && oldQuantityQuintals > 0) {
-          console.log(`🔍 Looking for old ByProduct: outturnId=${production.outturnId}, date=${oldDateStr}`);
-          let oldByProduct = await ByProduct.findOne({
-            where: { outturnId: production.outturnId, date: oldDateStr }
+        console.log(`   - SYNC STEP 1: Subtract old values from [Date: ${oldDateStr}, Outturn: ${oldOutturnId}, Field: ${oldField}]`);
+
+        // Always subtract from old location if anything changed
+        if (oldQuantityQuintals > 0) {
+          const oldByProduct = await ByProduct.findOne({
+            where: { outturnId: oldOutturnId, date: oldDateStr }
           });
+
           if (oldByProduct) {
             const currentVal = parseFloat(oldByProduct[oldField]) || 0;
             const newVal = Math.max(0, currentVal - oldQuantityQuintals);
             await oldByProduct.update({ [oldField]: newVal });
-            console.log(`✅ Subtracted ${oldQuantityQuintals} from OLD date ${oldDateStr}: ${oldField} = ${newVal}`);
+            console.log(`     ✅ Subtracted ${oldQuantityQuintals} from old record. New ${oldField} = ${newVal}`);
           } else {
-            console.log(`⚠️ Could not find old ByProduct for date ${oldDateStr}`);
+            console.log(`     ⚠️ No By-Product record found for old date/outturn. Skipping subtraction.`);
           }
         }
 
-        // STEP 2: ADD new quantity to NEW date's By-Products
-        console.log(`🔍 Looking for new ByProduct: outturnId=${production.outturnId}, date=${newDateStr}`);
+        console.log(`   - SYNC STEP 2: Add new values to [Date: ${newDateStr}, Outturn: ${newOutturnId}, Field: ${newField}]`);
+
+        // Add new values to new location
         let newByProduct = await ByProduct.findOne({
-          where: { outturnId: production.outturnId, date: newDateStr }
+          where: { outturnId: newOutturnId, date: newDateStr }
         });
 
         if (newByProduct) {
           const currentVal = parseFloat(newByProduct[newField]) || 0;
-          let newVal;
-          if (dateChanged) {
-            // Date changed: add full new quantity (we already subtracted from old)
-            newVal = currentVal + quantityQuintals;
-          } else {
-            // Same date: just add the difference
-            newVal = Math.max(0, currentVal + (quantityQuintals - oldQuantityQuintals));
-          }
+          const newVal = currentVal + quantityQuintals;
           await newByProduct.update({ [newField]: newVal });
-          console.log(`✅ Updated NEW date ${newDateStr}: ${newField} = ${newVal}`);
-        } else {
-          // Create new by-product entry for new date
+          console.log(`     ✅ Added ${quantityQuintals} to existing new record. New ${newField} = ${newVal}`);
+        } else if (quantityQuintals > 0) {
           const byProductData = {
-            outturnId: production.outturnId,
+            outturnId: newOutturnId,
             date: newDateStr,
             rice: 0, rejectionRice: 0, rjRice1: 0, rjRice2: 0,
             broken: 0, rejectionBroken: 0, zeroBroken: 0,
@@ -751,9 +755,10 @@ router.put('/:id', auth, async (req, res) => {
           };
           byProductData[newField] = quantityQuintals;
           await ByProduct.create(byProductData);
-          console.log(`✅ Created By-Product for ${newDateStr} with ${newField} = ${quantityQuintals}`);
+          console.log(`     ✅ Created NEW By-Product record for ${newDateStr} with ${quantityQuintals} ${newField}`);
         }
       }
+      console.log(`📊 BY-PRODUCTS SYNC COMPLETED`);
     } catch (byProductError) {
       console.error('⚠️ Failed to update By-Products:', byProductError.message);
       // Don't fail the main request - just log the error
