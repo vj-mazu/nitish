@@ -1097,56 +1097,56 @@ const Records: React.FC = () => {
     fetchAvailableBags();
   }, [selectedOutturnId]);
 
-  // Fetch historical opening balance when stock tab is active and date range filter is applied
-  // SIMPLIFIED: Only for date range filter (month filter removed from stock tab)
-  useEffect(() => {
-    const fetchOpeningBalance = async () => {
-      // Only fetch for stock tab when we have a dateFrom filter
-      // (month filter has been removed to avoid calculation errors)
-      if (activeTab !== 'stock' || !dateFrom) {
-        setHistoricalOpeningBalance(null);
+  const fetchOpeningBalance = async () => {
+    // Only fetch for stock tab when we have a dateFrom filter
+    // (month filter has been removed to avoid calculation errors)
+    if (activeTab !== 'stock' || !dateFrom) {
+      setHistoricalOpeningBalance(null);
+      return;
+    }
+
+    // Validate date format: must be DD-MM-YYYY (10 characters)
+    if (dateFrom.length !== 10 || dateFrom.split('-').length !== 3) {
+      console.log(`⏳ Waiting for complete date format (current: ${dateFrom})`);
+      return; // Don't fetch until date is complete
+    }
+
+    try {
+      // Use the dateFrom as the beforeDate for opening balance calculation
+      const beforeDate = convertDateFormat(dateFrom);
+
+      if (!beforeDate || beforeDate.length !== 10) {
+        console.log(`⚠️ Invalid converted date: ${beforeDate}`);
         return;
       }
 
-      // Validate date format: must be DD-MM-YYYY (10 characters)
-      if (dateFrom.length !== 10 || dateFrom.split('-').length !== 3) {
-        console.log(`⏳ Waiting for complete date format (current: ${dateFrom})`);
-        return; // Don't fetch until date is complete
-      }
+      console.log(`📊 Fetching opening balance before ${beforeDate}...`);
+      const response = await axios.get<{
+        warehouseBalance: { [key: string]: { variety: string; location: string; bags: number } };
+        productionBalance: { [key: string]: { variety: string; outturn: string; bags: number } };
+      }>('/arrivals/opening-balance', {
+        params: { beforeDate }
+      });
 
-      try {
-        // Use the dateFrom as the beforeDate for opening balance calculation
-        const beforeDate = convertDateFormat(dateFrom);
-
-        if (!beforeDate || beforeDate.length !== 10) {
-          console.log(`⚠️ Invalid converted date: ${beforeDate}`);
-          return;
-        }
-
-        console.log(`📊 Fetching opening balance before ${beforeDate}...`);
-        const response = await axios.get<{
-          warehouseBalance: { [key: string]: { variety: string; location: string; bags: number } };
-          productionBalance: { [key: string]: { variety: string; outturn: string; bags: number } };
-        }>('/arrivals/opening-balance', {
-          params: { beforeDate }
+      if (response.data) {
+        setHistoricalOpeningBalance({
+          warehouseBalance: response.data.warehouseBalance || {},
+          productionBalance: response.data.productionBalance || {}
         });
-
-        if (response.data) {
-          setHistoricalOpeningBalance({
-            warehouseBalance: response.data.warehouseBalance || {},
-            productionBalance: response.data.productionBalance || {}
-          });
-          console.log('✅ Opening balance fetched:', {
-            warehouseEntries: Object.keys(response.data.warehouseBalance || {}).length,
-            productionEntries: Object.keys(response.data.productionBalance || {}).length
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching opening balance:', error);
-        setHistoricalOpeningBalance(null);
+        console.log('✅ Opening balance fetched:', {
+          warehouseEntries: Object.keys(response.data.warehouseBalance || {}).length,
+          productionEntries: Object.keys(response.data.productionBalance || {}).length
+        });
       }
-    };
+    } catch (error) {
+      console.error('Error fetching opening balance:', error);
+      setHistoricalOpeningBalance(null);
+    }
+  };
 
+  // Fetch historical opening balance when stock tab is active and date range filter is applied
+  // SIMPLIFIED: Only for date range filter (month filter removed from stock tab)
+  useEffect(() => {
     fetchOpeningBalance();
   }, [activeTab, dateFrom]); // Removed selectedMonth dependency
 
@@ -1656,8 +1656,11 @@ const Records: React.FC = () => {
             fetchProductionRecords(),   // Refresh Production Shifting records
             fetchOutturns(),            // Refresh outturns list for Outturn Report tab
             fetchByProducts(),          // Refresh By-Products records
-            fetchRecords()              // Refresh main records (affects all tabs)
+            fetchRecords(),             // Refresh main records (affects all tabs)
+            fetchAllRiceProductions(),   // Refresh all productions for Paddy Stock deductions
+            fetchOpeningBalance()       // Refresh opening balance for Paddy Stock continuity
           ]);
+
 
           toast.success('Rice movement updated successfully - All data refreshed!');
         } catch (refreshError) {
@@ -1945,10 +1948,13 @@ const Records: React.FC = () => {
       setLorryNumber('');
       setBillNumber('');
 
-      // Refresh production records, rice stock, and by-products
+      // Refresh production records, rice stock, by-products AND paddy stock data
       fetchProductionRecords();
       fetchRiceStock();
       fetchByProducts();
+      fetchRecords();
+      fetchAllRiceProductions();
+      fetchOpeningBalance();
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to save entry');
     } finally {
@@ -2219,9 +2225,11 @@ const Records: React.FC = () => {
 
   const fetchAllRiceProductions = async () => {
     try {
-      console.log('Fetching all rice productions for paddy stock...');
-      const response = await axios.get<{ productions: any[] }>('/rice-productions');
-      console.log('All rice productions:', response.data);
+      console.log('Fetching all rice productions for paddy stock (limit: 5000)...');
+      const response = await axios.get<{ productions: any[] }>('/rice-productions', {
+        params: { limit: 5000 }
+      });
+      console.log('All rice productions:', response.data.productions?.length || 0, 'records');
       setAllRiceProductions(response.data.productions || []);
     } catch (error: any) {
       console.error('Error fetching rice productions:', error);
@@ -2234,6 +2242,7 @@ const Records: React.FC = () => {
       setLastToastMessage(''); // Clear last toast
       toast.success(`Record ${status} successfully`);
       fetchRecords();
+      fetchOpeningBalance(); // Refresh stock totals
     } catch (error: any) {
       toast.error(error.response?.data?.error || `Failed to ${status} record`);
     }
@@ -2244,6 +2253,7 @@ const Records: React.FC = () => {
       await axios.patch(`/arrivals/${id}/admin-approve`);
       toast.success('Record approved by admin - added to paddy stock');
       fetchRecords();
+      fetchOpeningBalance(); // Refresh stock totals
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to approve record');
     }

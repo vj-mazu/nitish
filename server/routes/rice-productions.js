@@ -64,7 +64,7 @@ router.get('/', auth, async (req, res) => {
     if (status) where.status = status;
 
     // Pagination setup
-    const limitNum = Math.min(parseInt(limit), 500);
+    const limitNum = Math.min(parseInt(limit), 5000); // Increased from 500 for Paddy Stock accuracy
     const pageNum = parseInt(page) || 1;
     const offset = (pageNum - 1) * limitNum;
 
