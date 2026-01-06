@@ -8,6 +8,7 @@ const User = require('../models/User');
 const Arrival = require('../models/Arrival');
 const ByProduct = require('../models/ByProduct');
 const YieldCalculationService = require('../services/YieldCalculationService');
+const ByProductSyncService = require('../services/ByProductSyncService');
 
 const router = express.Router();
 
@@ -389,76 +390,15 @@ router.post('/', auth, async (req, res) => {
       status: 'pending'
     });
 
-    // Automatically create or update by-product record with the produced quantity
+    // AUTOMATIC RESYNC: Using the new robust full-resync service
     // This ensures every rice production has a corresponding by-product entry
-    // Check if by-product entry already exists for this outturn and date
-    let existingByProduct = await ByProduct.findOne({
-      where: { outturnId: finalOutturnId, date: date }
-    });
-
-    // Determine which field to update based on product type
-    const productTypeLower = productType.toLowerCase();
-    let fieldToUpdate = 'rice'; // default
-
-    console.log('🔍 Product Type:', productType);
-    console.log('🔍 Product Type Lower:', productTypeLower);
-
-    if (productTypeLower === 'rj rice 1') {
-      console.log('✅ Matched RJ Rice 1');
-      fieldToUpdate = 'rjRice1';
-    } else if (productTypeLower === 'rj rice 2') {
-      console.log('✅ Matched RJ Rice 2');
-      fieldToUpdate = 'rjRice2';
-    } else if (productTypeLower.includes('rice') && !productTypeLower.includes('rejection') && !productTypeLower.includes('sizer')) {
-      fieldToUpdate = 'rice';
-    } else if ((productTypeLower.includes('rejection') && productTypeLower.includes('rice')) || (productTypeLower.includes('sizer') && productTypeLower.includes('broken'))) {
-      // Handle both "Rejection Rice" (old) and "Sizer Broken" (new) -> maps to rejectionRice field
-      fieldToUpdate = 'rejectionRice';
-    } else if (productTypeLower.includes('broken') && !productTypeLower.includes('rejection') && !productTypeLower.includes('zero') && !productTypeLower.includes('sizer')) {
-      fieldToUpdate = 'broken';
-    } else if (productTypeLower.includes('rejection') && productTypeLower.includes('broken')) {
-      fieldToUpdate = 'rejectionBroken';
-    } else if (productTypeLower.includes('zero') && productTypeLower.includes('broken')) {
-      fieldToUpdate = 'zeroBroken';
-    } else if (productTypeLower.includes('faram')) {
-      fieldToUpdate = 'faram';
-    } else if (productTypeLower.includes('bran')) {
-      fieldToUpdate = 'bran';
-    } else if (productTypeLower.includes('unpolished')) {
-      fieldToUpdate = 'unpolished';
+    // and cleans up any inconsistencies in a single step.
+    try {
+      await ByProductSyncService.syncOutturn(finalOutturnId, req.user.userId);
+    } catch (syncError) {
+      console.error('⚠️ By-Product sync failed during creation:', syncError.message);
+      // Don't fail the main request, but log it
     }
-
-    console.log('📊 Field to update:', fieldToUpdate);
-    console.log('📊 Quantity:', quantityQuintals);
-
-    if (existingByProduct) {
-      // Update existing by-product - ADD to the existing value
-      const currentValue = parseFloat(existingByProduct[fieldToUpdate]) || 0;
-      const newValue = currentValue + quantityQuintals;
-      await existingByProduct.update({ [fieldToUpdate]: newValue });
-    } else {
-      // Create new by-product entry
-      const byProductData = {
-        outturnId: finalOutturnId,
-        date: date,
-        rice: 0,
-        rejectionRice: 0,
-        rjRice1: 0,
-        rjRice2: 0,
-        broken: 0,
-        rejectionBroken: 0,
-        zeroBroken: 0,
-        faram: 0,
-        bran: 0,
-        unpolished: 0,
-        createdBy: req.user.userId
-      };
-      byProductData[fieldToUpdate] = quantityQuintals;
-      await ByProduct.create(byProductData);
-    }
-
-    // Automatically recalculate yield percentage for this outturn
-    await YieldCalculationService.calculateAndUpdateYield(finalOutturnId);
 
     // Fetch with associations
     const createdProduction = await RiceProduction.findByPk(production.id, {
@@ -663,105 +603,23 @@ router.put('/:id', auth, async (req, res) => {
       ]
     });
 
-    // CRITICAL: Update By-Products table when quantity OR DATE changes
-    // This ensures Outturn Report shows correct totals after edit
+    // AUTOMATIC RESYNC: Clear and rebuild the By-Products table for this outturn
+    // This handles date changes, outturn changes, and quantity changes is a 100% robust way.
     try {
-      // Normalize dates to YYYY-MM-DD string for proper comparison
-      // TZ-SAFE Version: Extracts local date parts to avoid UTC shift
-      const normalizeDate = (d) => {
-        if (!d) return null;
-        if (typeof d === 'string') return d.substring(0, 10);
-        const dateObj = new Date(d);
-        if (isNaN(dateObj.getTime())) return null;
-
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
-      const oldDateStr = normalizeDate(oldDate);
-      const newDateStr = normalizeDate(date) || normalizeDate(production.date);
       const newOutturnId = outturnId || production.outturnId;
-      const newProductType = productType || oldProductType;
 
-      const dateChanged = oldDateStr !== newDateStr;
-      const outturnChanged = oldOutturnId !== newOutturnId;
-      const productTypeChanged = oldProductType !== newProductType;
-      const quantityChanged = Math.abs(quantityQuintals - oldQuantityQuintals) > 0.001;
-
-      console.log(`📊 BY-PRODUCTS SYNC START (Production ID: ${production.id})`);
-      console.log(`   - Changes detected: date=${dateChanged}, outturn=${outturnChanged}, type=${productTypeChanged}, qty=${quantityChanged}`);
-
-      const getFieldFromProductType = (typeStr) => {
-        if (!typeStr) return 'rice';
-        const typeLower = typeStr.toLowerCase();
-        if (typeLower === 'rj rice 1') return 'rjRice1';
-        if (typeLower === 'rj rice 2') return 'rjRice2';
-        if (typeLower === 'sizer broken') return 'rejectionRice'; // Sizer broken mapped to rejection rice column
-        if (typeLower.includes('rejection') && typeLower.includes('rice')) return 'rejectionRice';
-        if (typeLower.includes('rice')) return 'rice';
-        if (typeLower.includes('rejection') && typeLower.includes('broken')) return 'rejectionBroken';
-        if (typeLower.includes('zero') && typeLower.includes('broken')) return 'zeroBroken';
-        if (typeLower.includes('broken')) return 'broken';
-        if (typeLower.includes('faram')) return 'faram';
-        if (typeLower.includes('bran')) return 'bran';
-        if (typeLower.includes('unpolished')) return 'unpolished';
-        return 'rice';
-      };
-
-      if (dateChanged || outturnChanged || productTypeChanged || quantityChanged) {
-        const oldField = getFieldFromProductType(oldProductType);
-        const newField = getFieldFromProductType(newProductType);
-
-        console.log(`   - SYNC STEP 1: Subtract old values from [Date: ${oldDateStr}, Outturn: ${oldOutturnId}, Field: ${oldField}]`);
-
-        // Always subtract from old location if anything changed
-        if (oldQuantityQuintals > 0) {
-          const oldByProduct = await ByProduct.findOne({
-            where: { outturnId: oldOutturnId, date: oldDateStr }
-          });
-
-          if (oldByProduct) {
-            const currentVal = parseFloat(oldByProduct[oldField]) || 0;
-            const newVal = Math.max(0, currentVal - oldQuantityQuintals);
-            await oldByProduct.update({ [oldField]: newVal });
-            console.log(`     ✅ Subtracted ${oldQuantityQuintals} from old record. New ${oldField} = ${newVal}`);
-          } else {
-            console.log(`     ⚠️ No By-Product record found for old date/outturn. Skipping subtraction.`);
-          }
-        }
-
-        console.log(`   - SYNC STEP 2: Add new values to [Date: ${newDateStr}, Outturn: ${newOutturnId}, Field: ${newField}]`);
-
-        // Add new values to new location
-        let newByProduct = await ByProduct.findOne({
-          where: { outturnId: newOutturnId, date: newDateStr }
-        });
-
-        if (newByProduct) {
-          const currentVal = parseFloat(newByProduct[newField]) || 0;
-          const newVal = currentVal + quantityQuintals;
-          await newByProduct.update({ [newField]: newVal });
-          console.log(`     ✅ Added ${quantityQuintals} to existing new record. New ${newField} = ${newVal}`);
-        } else if (quantityQuintals > 0) {
-          const byProductData = {
-            outturnId: newOutturnId,
-            date: newDateStr,
-            rice: 0, rejectionRice: 0, rjRice1: 0, rjRice2: 0,
-            broken: 0, rejectionBroken: 0, zeroBroken: 0,
-            faram: 0, bran: 0, unpolished: 0,
-            createdBy: req.user.userId
-          };
-          byProductData[newField] = quantityQuintals;
-          await ByProduct.create(byProductData);
-          console.log(`     ✅ Created NEW By-Product record for ${newDateStr} with ${quantityQuintals} ${newField}`);
-        }
+      // If the outturn itself was changed, we must resync BOTH outturns
+      if (oldOutturnId !== newOutturnId) {
+        console.log(`📊 Outturn changed from ${oldOutturnId} to ${newOutturnId}. Resyncing both...`);
+        await ByProductSyncService.syncOutturn(oldOutturnId, req.user.userId);
+        await ByProductSyncService.syncOutturn(newOutturnId, req.user.userId);
+      } else {
+        // Just resync the current outturn
+        await ByProductSyncService.syncOutturn(newOutturnId, req.user.userId);
       }
-      console.log(`📊 BY-PRODUCTS SYNC COMPLETED`);
-    } catch (byProductError) {
-      console.error('⚠️ Failed to update By-Products:', byProductError.message);
-      // Don't fail the main request - just log the error
+    } catch (syncError) {
+      console.error('⚠️ By-Product resync failed during update:', syncError.message);
+      // Don't fail the main request - just log it
     }
 
     // CRITICAL: Clear all related caches to ensure fresh data on refresh
@@ -807,7 +665,15 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(400).json({ error: 'Only admins can delete approved entries' });
     }
 
+    const targetOutturnId = production.outturnId;
     await production.destroy();
+
+    // AUTOMATIC RESYNC: Clean up by-products table after deletion
+    try {
+      await ByProductSyncService.syncOutturn(targetOutturnId, req.user.userId);
+    } catch (syncError) {
+      console.error('⚠️ By-Product resync failed during deletion:', syncError.message);
+    }
 
     res.json({ message: 'Rice production entry deleted successfully' });
   } catch (error) {
