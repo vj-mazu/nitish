@@ -1107,7 +1107,7 @@ router.get('/opening-balance', auth, async (req, res) => {
     // Convert to objects keyed by variety-location or variety-outturn
     const warehouseBalance = {};
     warehouseStock.forEach(row => {
-      const key = `${row.variety}-${row.location}`;
+      const key = `${row.variety}|${row.location}`;
       warehouseBalance[key] = {
         variety: row.variety,
         location: row.location,
@@ -1117,7 +1117,7 @@ router.get('/opening-balance', auth, async (req, res) => {
 
     const productionBalance = {};
     productionStock.forEach(row => {
-      const key = `${row.variety}-${row.outturn}`;
+      const key = `${row.variety}|${row.outturn}`;
       productionBalance[key] = {
         variety: row.variety,
         outturn: row.outturn,
@@ -1143,7 +1143,7 @@ router.get('/opening-balance', auth, async (req, res) => {
       stack: error.stack,
       beforeDate: req.query.beforeDate
     });
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to calculate opening balance',
       message: error.message,
       beforeDate: req.query.beforeDate
